@@ -7,7 +7,13 @@ use serde::{Deserialize, Serialize};
 use crate::app::BrowseMode;
 use crate::library::Library;
 use crate::model::{PlaybackStatus, RepeatMode};
-use crate::provider::{CollectionSummary, ProviderId, TrackList};
+use crate::provider::{CollectionKind, CollectionSummary, ProviderId, TrackList, TrackSummary};
+
+pub(crate) const RECENTLY_PLAYED_PLAYLIST_ID: &str = "recently-played";
+const RECENTLY_PLAYED_PLAYLIST_TITLE: &str = "Recently Played";
+const RECENTLY_PLAYED_PLAYLIST_SUBTITLE: &str = "System playlist";
+const RECENTLY_PLAYED_PLAYLIST_KEY: &str = "recently_played_tracks";
+const RECENTLY_PLAYED_LIMIT: usize = 200;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSnapshot {
@@ -120,6 +126,63 @@ pub(super) fn load_provider_auth(
         .map_err(Into::into)
 }
 
+pub(super) fn load_recently_played_playlist(library: &Library) -> Result<Option<TrackList>> {
+    let connection = library.open_connection()?;
+    let stored_tracks: Option<String> = connection
+        .query_row(
+            "SELECT value FROM app_state WHERE key = ?1",
+            params![RECENTLY_PLAYED_PLAYLIST_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(stored_tracks) = stored_tracks else {
+        return Ok(None);
+    };
+    let tracks: Vec<TrackSummary> = serde_json::from_str(&stored_tracks)
+        .context("Failed to deserialize recently played tracks")?;
+    let tracks = hydrate_recently_played_tracks(library, tracks)?;
+    if tracks.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(recently_played_track_list(tracks)))
+}
+
+pub(super) fn record_recently_played_track(library: &Library, track: &TrackSummary) -> Result<()> {
+    let connection = library.open_connection()?;
+    let existing_tracks = connection
+        .query_row(
+            "SELECT value FROM app_state WHERE key = ?1",
+            params![RECENTLY_PLAYED_PLAYLIST_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .map(|stored_tracks| {
+            serde_json::from_str::<Vec<TrackSummary>>(&stored_tracks)
+                .context("Failed to deserialize recently played tracks")
+        })
+        .transpose()?
+        .unwrap_or_default();
+
+    let track = hydrate_recently_played_track(library, track.clone())?;
+    let tracks = prepend_recent_track(existing_tracks, track, RECENTLY_PLAYED_LIMIT);
+    let value =
+        serde_json::to_string(&tracks).context("Failed to serialize recently played tracks")?;
+    connection.execute(
+        r#"
+        INSERT INTO app_state (key, value, updated_at)
+        VALUES (?1, ?2, unixepoch())
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = unixepoch()
+        "#,
+        params![RECENTLY_PLAYED_PLAYLIST_KEY, value],
+    )?;
+
+    Ok(())
+}
+
 pub(super) fn save_collection_track_list(
     library: &Library,
     _collection: &crate::provider::CollectionRef,
@@ -134,4 +197,133 @@ pub(super) fn save_collection_track_list(
 
 fn provider_auth_key(provider: ProviderId) -> String {
     format!("provider_auth:{}", provider.as_str())
+}
+
+fn recently_played_track_list(tracks: Vec<TrackSummary>) -> TrackList {
+    TrackList {
+        collection: CollectionSummary {
+            reference: crate::provider::CollectionRef::new(
+                ProviderId::Local,
+                RECENTLY_PLAYED_PLAYLIST_ID,
+                CollectionKind::Playlist,
+                None,
+            ),
+            title: RECENTLY_PLAYED_PLAYLIST_TITLE.to_string(),
+            subtitle: Some(RECENTLY_PLAYED_PLAYLIST_SUBTITLE.to_string()),
+            artwork_url: None,
+            track_count: Some(tracks.len()),
+        },
+        tracks,
+    }
+}
+
+fn hydrate_recently_played_tracks(
+    library: &Library,
+    tracks: Vec<TrackSummary>,
+) -> Result<Vec<TrackSummary>> {
+    tracks
+        .into_iter()
+        .map(|track| hydrate_recently_played_track(library, track))
+        .collect()
+}
+
+fn hydrate_recently_played_track(
+    library: &Library,
+    mut track: TrackSummary,
+) -> Result<TrackSummary> {
+    if let Some(cached) = library.cached_track(&track)?
+        && let Some(artwork_path) = cached.artwork_path
+    {
+        track.artwork_url = Some(artwork_path.to_string_lossy().into_owned());
+    }
+
+    Ok(track)
+}
+
+fn prepend_recent_track(
+    mut tracks: Vec<TrackSummary>,
+    track: TrackSummary,
+    limit: usize,
+) -> Vec<TrackSummary> {
+    tracks.retain(|existing| {
+        !(existing.reference.provider == track.reference.provider
+            && existing.reference.id == track.reference.id)
+    });
+    tracks.insert(0, track);
+    tracks.truncate(limit.max(1));
+    tracks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::{ProviderId, TrackRef};
+
+    fn fixture_track(id: &str) -> TrackSummary {
+        TrackSummary {
+            reference: TrackRef::new(
+                ProviderId::parse("fixture_remote").expect("fixture provider"),
+                id,
+                None,
+                Some(format!("Track {id}")),
+            ),
+            title: format!("Track {id}"),
+            artist: Some("Artist".to_string()),
+            album: Some("Album".to_string()),
+            collection_id: Some("album-1".to_string()),
+            collection_title: Some("Album".to_string()),
+            collection_subtitle: Some("Artist".to_string()),
+            duration_seconds: Some(180),
+            bitrate_bps: None,
+            audio_format: None,
+            artwork_url: None,
+        }
+    }
+
+    #[test]
+    fn prepend_recent_track_moves_existing_track_to_front_without_duplicates() {
+        let tracks = prepend_recent_track(
+            vec![fixture_track("a"), fixture_track("b")],
+            fixture_track("a"),
+            10,
+        );
+
+        let ids = tracks
+            .iter()
+            .map(|track| track.reference.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn prepend_recent_track_trims_to_limit() {
+        let tracks = prepend_recent_track(
+            vec![fixture_track("a"), fixture_track("b"), fixture_track("c")],
+            fixture_track("z"),
+            3,
+        );
+
+        let ids = tracks
+            .iter()
+            .map(|track| track.reference.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["z", "a", "b"]);
+    }
+
+    #[test]
+    fn recently_played_track_list_uses_local_playlist_identity() {
+        let track_list = recently_played_track_list(vec![fixture_track("a")]);
+
+        assert_eq!(track_list.collection.reference.provider, ProviderId::Local);
+        assert_eq!(
+            track_list.collection.reference.id,
+            RECENTLY_PLAYED_PLAYLIST_ID
+        );
+        assert_eq!(
+            track_list.collection.reference.kind,
+            CollectionKind::Playlist
+        );
+        assert_eq!(track_list.collection.title, RECENTLY_PLAYED_PLAYLIST_TITLE);
+        assert_eq!(track_list.collection.track_count, Some(1));
+    }
 }

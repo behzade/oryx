@@ -500,6 +500,22 @@ pub(super) fn load_collection_track_list(
         let cached_bitrate_bps: Option<u32> = row.get(19)?;
         let cached_audio_format: Option<String> = row.get(20)?;
         let cached_artwork_path: Option<String> = row.get(21)?;
+        let (album, collection_id, collection_title, collection_subtitle) = match collection_kind {
+            CollectionKind::Album => (
+                cached_album
+                    .clone()
+                    .or_else(|| Some(collection_title.clone())),
+                Some(collection_id.clone()),
+                Some(collection_title.clone()),
+                collection_subtitle.clone(),
+            ),
+            CollectionKind::Playlist => (
+                cached_album.clone(),
+                None,
+                cached_album.clone(),
+                cached_artist.clone().or_else(|| track_subtitle.clone()),
+            ),
+        };
 
         let track_id = track_remote_id
             .unwrap_or_else(|| canonical_id_from_entity_id(&track_entity_id).to_string());
@@ -516,10 +532,10 @@ pub(super) fn load_collection_track_list(
                 ),
                 title: track_title,
                 artist: cached_artist.or(track_subtitle),
-                album: cached_album.or_else(|| Some(collection_title.clone())),
-                collection_id: Some(collection_id.clone()),
-                collection_title: Some(collection_title),
-                collection_subtitle: collection_subtitle,
+                album,
+                collection_id,
+                collection_title,
+                collection_subtitle,
                 duration_seconds: cached_duration_seconds.or(track_duration_seconds),
                 bitrate_bps: cached_bitrate_bps.or(track_bitrate_bps),
                 audio_format: cached_audio_format
@@ -1117,6 +1133,76 @@ mod tests {
         assert_eq!(loaded.tracks[0].duration_seconds, Some(301));
         assert_eq!(loaded.tracks[0].bitrate_bps, Some(320_000));
         assert_eq!(loaded.tracks[0].audio_format, Some(AudioFormat::Mp3));
+    }
+
+    #[test]
+    fn load_playlist_track_list_does_not_reuse_playlist_metadata_as_album_metadata() {
+        let connection = Connection::open_in_memory().expect("in-memory sqlite");
+        initialize_schema(&connection).expect("schema");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE cached_tracks (
+                    provider TEXT NOT NULL,
+                    track_id TEXT NOT NULL,
+                    artist TEXT,
+                    album TEXT,
+                    duration_seconds INTEGER,
+                    bitrate_bps INTEGER,
+                    audio_format TEXT,
+                    artwork_path TEXT
+                );
+                "#,
+            )
+            .expect("cached_tracks table");
+
+        let track_list = TrackList {
+            collection: CollectionSummary {
+                reference: CollectionRef::new(
+                    ProviderId::Local,
+                    LIKED_PLAYLIST_ID,
+                    CollectionKind::Playlist,
+                    None,
+                ),
+                title: LIKED_PLAYLIST_TITLE.to_string(),
+                subtitle: Some(LIKED_PLAYLIST_SUBTITLE.to_string()),
+                artwork_url: None,
+                track_count: Some(1),
+            },
+            tracks: vec![TrackSummary {
+                reference: TrackRef::new(
+                    fixture_provider(),
+                    "track-1",
+                    Some("https://example.com/track-1.mp3".to_string()),
+                    Some("Track One".to_string()),
+                ),
+                title: "Track One".to_string(),
+                artist: Some("Artist One".to_string()),
+                album: Some("Album One".to_string()),
+                collection_id: Some("album-1".to_string()),
+                collection_title: Some("Album One".to_string()),
+                collection_subtitle: Some("Artist One".to_string()),
+                duration_seconds: Some(301),
+                bitrate_bps: Some(320_000),
+                audio_format: Some(AudioFormat::Mp3),
+                artwork_url: Some("https://example.com/track.jpg".to_string()),
+            }],
+        };
+
+        sync_collection_track_list(&connection, &track_list).expect("sync track list");
+        let loaded = load_collection_track_list(&connection, &track_list.collection.reference)
+            .expect("load")
+            .expect("track list should exist");
+
+        assert_eq!(loaded.tracks.len(), 1);
+        assert_eq!(loaded.tracks[0].artist.as_deref(), Some("Artist One"));
+        assert!(loaded.tracks[0].album.is_none());
+        assert!(loaded.tracks[0].collection_id.is_none());
+        assert!(loaded.tracks[0].collection_title.is_none());
+        assert_eq!(
+            loaded.tracks[0].collection_subtitle.as_deref(),
+            Some("Artist One")
+        );
     }
 
     #[test]

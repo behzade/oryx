@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::library::Library;
-use crate::provider::{CollectionRef, TrackList, TrackSummary};
+use crate::library::{LIKED_PLAYLIST_ID, Library};
+use crate::provider::{CollectionKind, CollectionRef, TrackList, TrackSummary};
 
 use super::super::{
     BrowseMode, collection_browser_key, local_collection_selection_key, pick_existing_or_first,
@@ -62,8 +62,19 @@ impl LibraryModule {
             self.local_artists = build_local_artist_lists(&self.local_albums);
         }
 
-        if let Ok(playlists) = self.library.entity_playlist_track_lists() {
-            self.local_playlists = playlists;
+        if let Ok(mut playlists) = self.library.entity_playlist_track_lists() {
+            if let Ok(Some(recently_played)) = self.library.load_recently_played_playlist() {
+                let insert_index = playlists
+                    .iter()
+                    .position(|playlist| playlist.collection.reference.id == LIKED_PLAYLIST_ID)
+                    .map(|index| index + 1)
+                    .unwrap_or(0);
+                playlists.insert(insert_index, recently_played);
+            }
+            self.local_playlists = playlists
+                .into_iter()
+                .filter(|playlist| playlist.collection.reference.kind == CollectionKind::Playlist)
+                .collect();
         }
 
         if let Ok(cached_track_ids) = self.library.all_cached_track_ids() {

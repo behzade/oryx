@@ -11,6 +11,8 @@ use super::quality::{
     normalized_audio_quality_grade,
 };
 
+const SYSTEM_PLAYLIST_SUBTITLE: &str = "System playlist";
+
 pub(in crate::app) fn build_cached_quality_maps(
     tracks: &[CachedLibraryTrack],
 ) -> (
@@ -83,6 +85,12 @@ pub(in crate::app) fn filtered_cached_album_track_lists(
     track_lists: Vec<TrackList>,
 ) -> Vec<TrackList> {
     track_lists
+        .into_iter()
+        .filter(|track_list| track_list.collection.reference.kind == CollectionKind::Album)
+        .filter(|track_list| {
+            track_list.collection.subtitle.as_deref() != Some(SYSTEM_PLAYLIST_SUBTITLE)
+        })
+        .collect()
 }
 
 pub(in crate::app) fn build_local_artist_lists(albums: &[TrackList]) -> Vec<TrackList> {

@@ -24,7 +24,9 @@ pub use import::{
     ArtworkBackfillSummary, ImportAlbumReview, ImportMetadataField, ImportMetadataSource,
     ImportReview, ImportSummary, ImportTrackReview,
 };
+pub(crate) const LIKED_PLAYLIST_ID: &str = entities::LIKED_PLAYLIST_ID;
 pub use provider_state::ProviderRuntimeState;
+pub(crate) const RECENTLY_PLAYED_PLAYLIST_ID: &str = session::RECENTLY_PLAYED_PLAYLIST_ID;
 pub use session::SessionSnapshot;
 
 #[derive(Clone, Debug)]
@@ -227,6 +229,14 @@ impl Library {
 
     pub fn load_provider_auth(&self, provider: ProviderId) -> Result<Option<String>> {
         session::load_provider_auth(self, provider)
+    }
+
+    pub fn load_recently_played_playlist(&self) -> Result<Option<TrackList>> {
+        session::load_recently_played_playlist(self)
+    }
+
+    pub fn record_recently_played_track(&self, track: &TrackSummary) -> Result<()> {
+        session::record_recently_played_track(self, track)
     }
 
     pub fn load_provider_runtime_state(

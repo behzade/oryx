@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use gpui::{AsyncApp, Context, Entity, WeakEntity};
 
+use crate::library::RECENTLY_PLAYED_PLAYLIST_ID;
 use crate::provider::TrackList;
 use crate::transfer::{DownloadPurpose, TransferEvent};
 
@@ -236,7 +237,34 @@ impl OryxApp {
                     request.position,
                 ) {
                     Ok(()) => {
-                        if playback.fully_cached {
+                        let mut should_refresh_library = playback.fully_cached;
+                        if should_record_recently_played(&request.playback_context) {
+                            let recently_played_track = request
+                                .playback_context
+                                .tracks
+                                .get(request.index)
+                                .cloned()
+                                .map(|track| {
+                                    track_for_recently_played(
+                                        track,
+                                        playback.current.artwork_path.as_ref(),
+                                    )
+                                });
+                            let has_recently_played_track = recently_played_track.is_some();
+                            if let Some(track) = recently_played_track
+                                && let Err(error) =
+                                    self.library.record_recently_played_track(&track)
+                            {
+                                eprintln!(
+                                    "failed to record recently played track '{}:{}': {error:#}",
+                                    track.reference.provider.as_str(),
+                                    track.reference.id
+                                );
+                            } else if has_recently_played_track {
+                                should_refresh_library = true;
+                            }
+                        }
+                        if should_refresh_library {
                             self.refresh_local_library_views(cx);
                         }
                         self.status_message =
@@ -290,5 +318,94 @@ impl OryxApp {
             }
         }
         cx.notify();
+    }
+}
+
+fn should_record_recently_played(playback_context: &TrackList) -> bool {
+    let reference = &playback_context.collection.reference;
+    !(reference.provider == crate::provider::ProviderId::Local
+        && reference.id == RECENTLY_PLAYED_PLAYLIST_ID)
+}
+
+fn track_for_recently_played(
+    mut track: crate::provider::TrackSummary,
+    artwork_path: Option<&std::path::PathBuf>,
+) -> crate::provider::TrackSummary {
+    if let Some(artwork_path) = artwork_path {
+        track.artwork_url = Some(artwork_path.to_string_lossy().into_owned());
+    }
+    track
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::{CollectionKind, CollectionRef, CollectionSummary, ProviderId, TrackRef};
+
+    #[test]
+    fn skips_recording_when_playing_from_recently_played_playlist() {
+        let track_list = track_list(
+            ProviderId::Local,
+            RECENTLY_PLAYED_PLAYLIST_ID,
+            CollectionKind::Playlist,
+        );
+
+        assert!(!should_record_recently_played(&track_list));
+    }
+
+    #[test]
+    fn records_when_playing_from_other_local_playlists() {
+        let track_list = track_list(ProviderId::Local, "liked-tracks", CollectionKind::Playlist);
+
+        assert!(should_record_recently_played(&track_list));
+    }
+
+    #[test]
+    fn records_when_playing_from_albums() {
+        let track_list = track_list(fixture_provider(), "album-1", CollectionKind::Album);
+
+        assert!(should_record_recently_played(&track_list));
+    }
+
+    #[test]
+    fn recently_played_prefers_local_artwork_path_when_available() {
+        let track = track_summary("track-1", Some("https://cdn.example/art.jpg"));
+        let updated =
+            track_for_recently_played(track, Some(&std::path::PathBuf::from("/tmp/oryx-art.jpg")));
+
+        assert_eq!(updated.artwork_url.as_deref(), Some("/tmp/oryx-art.jpg"));
+    }
+
+    fn fixture_provider() -> ProviderId {
+        ProviderId::parse("fixture_remote").expect("fixture provider id should parse")
+    }
+
+    fn track_list(provider: ProviderId, collection_id: &str, kind: CollectionKind) -> TrackList {
+        TrackList {
+            collection: CollectionSummary {
+                reference: CollectionRef::new(provider, collection_id, kind, None),
+                title: "Collection".to_string(),
+                subtitle: None,
+                artwork_url: None,
+                track_count: Some(1),
+            },
+            tracks: vec![],
+        }
+    }
+
+    fn track_summary(id: &str, artwork_url: Option<&str>) -> crate::provider::TrackSummary {
+        crate::provider::TrackSummary {
+            reference: TrackRef::new(fixture_provider(), id, None, Some(id.to_string())),
+            title: id.to_string(),
+            artist: Some("Artist".to_string()),
+            album: Some("Album".to_string()),
+            collection_id: Some("album-1".to_string()),
+            collection_title: Some("Album".to_string()),
+            collection_subtitle: Some("Artist".to_string()),
+            duration_seconds: None,
+            bitrate_bps: None,
+            audio_format: None,
+            artwork_url: artwork_url.map(str::to_string),
+        }
     }
 }

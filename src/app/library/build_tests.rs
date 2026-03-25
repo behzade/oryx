@@ -141,6 +141,93 @@ fn local_artists_use_expected_artist_fallback_order() {
     );
 }
 
+#[test]
+fn filtered_cached_album_track_lists_excludes_playlists() {
+    let lists = vec![
+        album_track_list(
+            "album-1",
+            "Album One",
+            Some("Artist One"),
+            None,
+            &[track_summary(
+                fixture_provider(),
+                "track-1",
+                "Track One",
+                Some("album-1"),
+                Some("Album One"),
+                Some("Artist One"),
+            )],
+        ),
+        TrackList {
+            collection: CollectionSummary {
+                reference: CollectionRef::new(
+                    ProviderId::Local,
+                    "playlist-1",
+                    CollectionKind::Playlist,
+                    None,
+                ),
+                title: "Playlist One".to_string(),
+                subtitle: None,
+                artwork_url: None,
+                track_count: Some(1),
+            },
+            tracks: vec![track_summary(
+                fixture_provider(),
+                "track-2",
+                "Track Two",
+                Some("album-2"),
+                Some("Album Two"),
+                Some("Artist Two"),
+            )],
+        },
+    ];
+
+    let filtered = filtered_cached_album_track_lists(lists);
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].collection.reference.kind, CollectionKind::Album);
+    assert_eq!(filtered[0].collection.title, "Album One");
+}
+
+#[test]
+fn filtered_cached_album_track_lists_excludes_system_playlist_ghost_albums() {
+    let lists = vec![
+        album_track_list(
+            "album-1",
+            "Album One",
+            Some("Artist One"),
+            None,
+            &[track_summary(
+                fixture_provider(),
+                "track-1",
+                "Track One",
+                Some("album-1"),
+                Some("Album One"),
+                Some("Artist One"),
+            )],
+        ),
+        album_track_list(
+            "liked-tracks",
+            "Liked Tracks",
+            Some("System playlist"),
+            None,
+            &[track_summary(
+                fixture_provider(),
+                "track-2",
+                "Track Two",
+                Some("liked-tracks"),
+                Some("Liked Tracks"),
+                Some("System playlist"),
+            )],
+        ),
+    ];
+
+    let filtered = filtered_cached_album_track_lists(lists);
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].collection.title, "Album One");
+}
+
 fn album_track_list(
     id: &str,
     title: &str,
