@@ -698,7 +698,15 @@ fn like_icon_button(active: bool, disabled: bool) -> gpui::Div {
         .flex()
         .items_center()
         .justify_center()
-        .child(render_icon_with_color(AppIcon::Heart, 18., icon_color))
+        .child(render_icon_with_color(
+            if active {
+                AppIcon::HeartFilled
+            } else {
+                AppIcon::Heart
+            },
+            18.,
+            icon_color,
+        ))
 }
 
 fn progress_click_ratio(event: &MouseDownEvent, window: &Window) -> f32 {

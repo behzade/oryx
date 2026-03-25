@@ -440,7 +440,7 @@ impl OryxApp {
                                 &primary_metadata,
                                 secondary_metadata.as_deref(),
                                 metadata,
-                                artwork_url,
+                                super::rows::render_collection_artwork(artwork_url, 62.),
                                 active,
                             )
                             .id(("discover", index))

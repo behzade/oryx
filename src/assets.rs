@@ -23,6 +23,7 @@ impl AssetSource for EmbeddedAssetSource {
             "icons/lucide" => vec![
                 "download.svg".into(),
                 "heart.svg".into(),
+                "heart-filled.svg".into(),
                 "music-4.svg".into(),
                 "pause.svg".into(),
                 "play.svg".into(),
@@ -58,6 +59,9 @@ fn embedded_asset(path: &str) -> Option<&'static [u8]> {
         "icons/lucide/repeat-2.svg" => Some(include_bytes!("../assets/icons/lucide/repeat-2.svg")),
         "icons/lucide/music-4.svg" => Some(include_bytes!("../assets/icons/lucide/music-4.svg")),
         "icons/lucide/heart.svg" => Some(include_bytes!("../assets/icons/lucide/heart.svg")),
+        "icons/lucide/heart-filled.svg" => {
+            Some(include_bytes!("../assets/icons/lucide/heart-filled.svg"))
+        }
         "icons/lucide/download.svg" => Some(include_bytes!("../assets/icons/lucide/download.svg")),
         "icons/lucide/trash.svg" => Some(include_bytes!("../assets/icons/lucide/trash.svg")),
         "icons/lucide/trash-2.svg" => Some(include_bytes!("../assets/icons/lucide/trash-2.svg")),

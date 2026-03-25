@@ -15,8 +15,8 @@ use super::super::ui::ContextMenuTarget;
 use super::rows::{
     artist_album_metadata, clickable_row, empty_state, panel_body, render_collection_artwork,
     render_download_progress_line, render_row_metadata, render_track_download_action,
-    render_track_like_action, row_shell, sidebar_primary_metadata, sidebar_secondary_metadata,
-    summarize_collection_quality, summarize_track_list_quality,
+    render_track_like_action, render_track_list_artwork, row_shell, sidebar_primary_metadata,
+    sidebar_secondary_metadata, summarize_collection_quality, summarize_track_list_quality,
 };
 use super::{
     AppIcon, BrowseMode, CollectionKindLabel, OryxApp, format_duration,
@@ -127,7 +127,7 @@ impl OryxApp {
                             &primary_metadata,
                             secondary_metadata.as_deref(),
                             metadata,
-                            track_list.collection.artwork_url.clone(),
+                            render_track_list_artwork(&track_list, 62.),
                             is_active,
                         )
                         .id((
@@ -266,6 +266,7 @@ impl OryxApp {
                 .unwrap_or(track_list.tracks.len())
         );
         let show_metadata = !self.should_show_compact_metadata(window);
+        let show_playlist_track_artwork = self.browse_mode == BrowseMode::Playlists;
         let collection_metadata = if show_metadata {
             self.track_list_metadata(&track_list, cx)
         } else {
@@ -308,11 +309,15 @@ impl OryxApp {
                         let download_progress = active_download
                             .as_ref()
                             .map(|download| download.progress.snapshot());
-                        let subtitle = format!(
-                            "{}  •  {}",
-                            track.artist.as_deref().unwrap_or("Unknown artist"),
-                            format_duration(track.duration_seconds)
-                        );
+                        let subtitle = if show_playlist_track_artwork {
+                            playlist_track_subtitle(&track)
+                        } else {
+                            format!(
+                                "{}  •  {}",
+                                track.artist.as_deref().unwrap_or("Unknown artist"),
+                                format_duration(track.duration_seconds)
+                            )
+                        };
                         let metadata = this.track_metadata_for_collection(
                             &track,
                             track_list.collection.reference.provider,
@@ -342,6 +347,12 @@ impl OryxApp {
                                     .flex()
                                     .items_center()
                                     .gap(px(theme::SPACE_3))
+                                    .when(show_playlist_track_artwork, |row| {
+                                        row.child(render_collection_artwork(
+                                            track.artwork_url.clone(),
+                                            48.,
+                                        ))
+                                    })
                                     .child(
                                         div()
                                             .flex_1()
@@ -469,10 +480,7 @@ impl OryxApp {
                     .flex()
                     .items_center()
                     .gap(px(theme::SPACE_3))
-                    .child(render_collection_artwork(
-                        track_list.collection.artwork_url.clone(),
-                        108.,
-                    ))
+                    .child(render_track_list_artwork(&track_list, 108.))
                     .child(
                         div()
                             .flex_1()
@@ -938,4 +946,24 @@ fn artist_group_rows(track_list: &TrackList) -> Vec<ArtistTrackRow> {
     }
 
     rows
+}
+
+fn playlist_track_subtitle(track: &TrackSummary) -> String {
+    let mut parts = Vec::new();
+    parts.push(
+        track
+            .artist
+            .as_deref()
+            .unwrap_or("Unknown artist")
+            .to_string(),
+    );
+    if let Some(album) = track
+        .album
+        .as_deref()
+        .filter(|album| !album.trim().is_empty())
+    {
+        parts.push(album.to_string());
+    }
+    parts.push(format_duration(track.duration_seconds));
+    parts.join("  •  ")
 }

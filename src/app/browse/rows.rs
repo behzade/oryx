@@ -9,7 +9,7 @@ use gpui::{
 
 use crate::app::library::AudioQualityGrade;
 use crate::progressive::ProgressiveSnapshot;
-use crate::provider::{ProviderId, TrackList, TrackSummary};
+use crate::provider::{CollectionKind, ProviderId, TrackList, TrackSummary};
 use crate::theme;
 
 use super::{
@@ -145,7 +145,14 @@ pub(super) fn render_track_like_action(is_liked: bool) -> gpui::Div {
         .child(
             div().w(px(16.)).h(px(16.)).overflow_hidden().child(
                 gpui::svg()
-                    .path(AppIcon::Heart.asset_path())
+                    .path(
+                        if is_liked {
+                            AppIcon::HeartFilled
+                        } else {
+                            AppIcon::Heart
+                        }
+                        .asset_path(),
+                    )
                     .w_full()
                     .h_full()
                     .text_color(rgb(icon_color)),
@@ -211,7 +218,7 @@ pub(super) fn clickable_row(
     primary_metadata: &str,
     secondary_metadata: Option<&str>,
     metadata: Option<RowMetadata>,
-    artwork_url: Option<String>,
+    artwork: impl IntoElement,
     active: bool,
 ) -> gpui::Div {
     row_shell(active, 86., 8.)
@@ -221,7 +228,7 @@ pub(super) fn clickable_row(
         .flex()
         .items_center()
         .gap(px(theme::SPACE_3))
-        .child(render_collection_artwork(artwork_url, 62.))
+        .child(artwork)
         .child(
             div()
                 .flex_1()
@@ -579,6 +586,109 @@ pub(super) fn render_collection_artwork(artwork_url: Option<String>, size: f32) 
         ),
         None => frame.child(collection_artwork_fallback()),
     }
+}
+
+pub(super) fn render_track_list_artwork(track_list: &TrackList, size: f32) -> gpui::Div {
+    let fallback_artwork = track_list.collection.artwork_url.clone().or_else(|| {
+        track_list
+            .tracks
+            .iter()
+            .find_map(|track| track.artwork_url.clone())
+    });
+
+    if is_local_playlist(track_list) {
+        let artwork_urls = track_list
+            .tracks
+            .iter()
+            .filter_map(|track| track.artwork_url.clone())
+            .filter(|artwork| !artwork.trim().is_empty())
+            .take(4)
+            .collect::<Vec<_>>();
+
+        if artwork_urls.len() >= 2 {
+            return render_artwork_collage(&artwork_urls, size);
+        }
+
+        if let Some(artwork) = artwork_urls.into_iter().next() {
+            return render_collection_artwork(Some(artwork), size);
+        }
+    }
+
+    render_collection_artwork(fallback_artwork, size)
+}
+
+fn render_artwork_collage(artwork_urls: &[String], size: f32) -> gpui::Div {
+    let corner_radius = 10.;
+    let gap = 1.;
+    let tile_size = ((size - gap) / 2.0).max(1.0);
+    let second_offset = tile_size + gap;
+    let frame = div()
+        .w(px(size))
+        .h(px(size))
+        .flex_shrink_0()
+        .rounded(px(corner_radius))
+        .overflow_hidden()
+        .border_1()
+        .border_color(rgb(theme::BORDER_SUBTLE))
+        .bg(rgb(theme::SURFACE_BASE))
+        .relative();
+
+    let tiles = [
+        (0., 0.),
+        (second_offset, 0.),
+        (0., second_offset),
+        (second_offset, second_offset),
+    ];
+    let mut collage = frame;
+    for (index, (left, top)) in tiles.into_iter().enumerate() {
+        collage = collage.child(
+            div()
+                .absolute()
+                .left(px(left))
+                .top(px(top))
+                .w(px(tile_size))
+                .h(px(tile_size))
+                .bg(rgb(theme::SURFACE_BASE))
+                .child(render_collage_tile(
+                    artwork_urls
+                        .get(index)
+                        .cloned()
+                        .or_else(|| artwork_urls.last().cloned()),
+                )),
+        );
+    }
+
+    collage
+}
+
+fn render_collage_tile(artwork_url: Option<String>) -> gpui::Div {
+    let tile = div()
+        .size_full()
+        .overflow_hidden()
+        .bg(rgb(theme::SURFACE_BASE));
+
+    match artwork_url {
+        Some(url) if url.starts_with("http://") || url.starts_with("https://") => tile.child(
+            img(url)
+                .w_full()
+                .h_full()
+                .object_fit(ObjectFit::Cover)
+                .with_fallback(|| collection_artwork_fallback().into_any_element()),
+        ),
+        Some(path) => tile.child(
+            img(PathBuf::from(path))
+                .w_full()
+                .h_full()
+                .object_fit(ObjectFit::Cover)
+                .with_fallback(|| collection_artwork_fallback().into_any_element()),
+        ),
+        None => tile.child(collection_artwork_fallback()),
+    }
+}
+
+fn is_local_playlist(track_list: &TrackList) -> bool {
+    track_list.collection.reference.kind == CollectionKind::Playlist
+        && track_list.collection.reference.provider == ProviderId::Local
 }
 
 fn collection_artwork_fallback() -> gpui::Div {
