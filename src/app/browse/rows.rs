@@ -130,6 +130,29 @@ pub(super) fn render_track_download_action(is_cancel: bool) -> gpui::Div {
         )
 }
 
+pub(super) fn render_track_like_action(is_liked: bool) -> gpui::Div {
+    let icon_color = if is_liked {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_DIM
+    };
+
+    div()
+        .flex_shrink_0()
+        .px(px(theme::SPACE_2))
+        .py(px(theme::SPACE_2))
+        .cursor_pointer()
+        .child(
+            div().w(px(16.)).h(px(16.)).overflow_hidden().child(
+                gpui::svg()
+                    .path(AppIcon::Heart.asset_path())
+                    .w_full()
+                    .h_full()
+                    .text_color(rgb(icon_color)),
+            ),
+        )
+}
+
 pub(super) fn panel_body(body: impl IntoElement) -> gpui::Div {
     div()
         .h_full()

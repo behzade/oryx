@@ -14,9 +14,9 @@ use super::super::track_cache_key;
 use super::super::ui::ContextMenuTarget;
 use super::rows::{
     artist_album_metadata, clickable_row, empty_state, panel_body, render_collection_artwork,
-    render_download_progress_line, render_row_metadata, render_track_download_action, row_shell,
-    sidebar_primary_metadata, sidebar_secondary_metadata, summarize_collection_quality,
-    summarize_track_list_quality,
+    render_download_progress_line, render_row_metadata, render_track_download_action,
+    render_track_like_action, row_shell, sidebar_primary_metadata, sidebar_secondary_metadata,
+    summarize_collection_quality, summarize_track_list_quality,
 };
 use super::{
     AppIcon, BrowseMode, CollectionKindLabel, OryxApp, format_duration,
@@ -303,6 +303,7 @@ impl OryxApp {
                         let active = current_playing_track_key.as_deref()
                             == Some(track_cache_key(&track).as_str());
                         let is_cached = this.track_is_cached(&track, cx);
+                        let is_liked = this.track_is_liked(&track, cx);
                         let active_download = this.active_download(&track, cx);
                         let download_progress = active_download
                             .as_ref()
@@ -375,6 +376,20 @@ impl OryxApp {
                                         |row, metadata| {
                                         row.child(render_row_metadata(metadata))
                                         },
+                                    )
+                                    .child(
+                                        render_track_like_action(is_liked).on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(
+                                                move |this,
+                                                      _event: &MouseDownEvent,
+                                                      _window,
+                                                      cx| {
+                                                    cx.stop_propagation();
+                                                    this.toggle_track_like(track.clone(), cx);
+                                                },
+                                            ),
+                                        ),
                                     )
                                     .when(!is_cached, |row| {
                                         row.child(
@@ -646,6 +661,7 @@ impl OryxApp {
                             let active = current_playing_track_key.as_deref()
                                 == Some(track_cache_key(&track).as_str());
                             let is_cached = this.track_is_cached(&track, cx);
+                            let is_liked = this.track_is_liked(&track, cx);
                             let active_download = this.active_download(&track, cx);
                             let download_progress = active_download
                                 .as_ref()
@@ -723,6 +739,20 @@ impl OryxApp {
                                             |row, metadata| {
                                                 row.child(render_row_metadata(metadata))
                                             },
+                                        )
+                                        .child(
+                                            render_track_like_action(is_liked).on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(
+                                                    move |this,
+                                                          _event: &MouseDownEvent,
+                                                          _window,
+                                                          cx| {
+                                                        cx.stop_propagation();
+                                                        this.toggle_track_like(track.clone(), cx);
+                                                    },
+                                                ),
+                                            ),
                                         )
                                         .when(!is_cached, |row| {
                                             row.child(

@@ -193,6 +193,10 @@ impl OryxApp {
         };
         let progress = self.playback_state.read(cx).current_playback_position();
         let total = self.playback_state.read(cx).current_track_duration();
+        let current_track_summary = self.current_playback_track_summary(cx);
+        let current_track_liked = current_track_summary
+            .as_ref()
+            .is_some_and(|track| self.track_is_liked(track, cx));
         let progress_ratio = total
             .map(|total| {
                 if total.is_zero() {
@@ -368,7 +372,23 @@ impl OryxApp {
                                             },
                                         ),
                                     ),
-                                ),
+                                )
+                                .when_some(current_track_summary.clone(), |controls, track| {
+                                    controls.child(
+                                        like_icon_button(current_track_liked, controls_disabled)
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(
+                                                    move |this,
+                                                          _event: &MouseDownEvent,
+                                                          _window,
+                                                          cx| {
+                                                        this.toggle_track_like(track.clone(), cx);
+                                                    },
+                                                ),
+                                            ),
+                                    )
+                                }),
                         ),
                     )
                     .child(
@@ -661,6 +681,24 @@ fn progress_bar(progress_ratio: f32, disabled: bool) -> gpui::Div {
                 .rounded(px(theme::RADIUS_FULL))
                 .bg(rgb(theme::ACCENT_PRIMARY)),
         )
+}
+
+fn like_icon_button(active: bool, disabled: bool) -> gpui::Div {
+    let icon_color = if active {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+
+    div()
+        .w(px(34.))
+        .h(px(34.))
+        .cursor_pointer()
+        .when(disabled, |this| this.opacity(0.45))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(render_icon_with_color(AppIcon::Heart, 18., icon_color))
 }
 
 fn progress_click_ratio(event: &MouseDownEvent, window: &Window) -> f32 {

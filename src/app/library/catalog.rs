@@ -27,6 +27,7 @@ pub(in crate::app) struct LibraryModule {
     cached_track_qualities: HashMap<String, AudioQuality>,
     cached_collection_qualities: HashMap<String, CollectionQualitySummary>,
     cached_track_ids: HashSet<String>,
+    liked_track_ids: HashSet<String>,
 }
 
 impl LibraryModule {
@@ -42,6 +43,7 @@ impl LibraryModule {
             cached_track_qualities: HashMap::new(),
             cached_collection_qualities: HashMap::new(),
             cached_track_ids: HashSet::new(),
+            liked_track_ids: HashSet::new(),
         };
         catalog.refresh();
         catalog
@@ -66,6 +68,10 @@ impl LibraryModule {
 
         if let Ok(cached_track_ids) = self.library.all_cached_track_ids() {
             self.cached_track_ids = cached_track_ids;
+        }
+
+        if let Ok(liked_track_ids) = self.library.liked_track_keys() {
+            self.liked_track_ids = liked_track_ids;
         }
 
         self.selected_local_album_id = pick_existing_or_first(
@@ -176,6 +182,10 @@ impl LibraryModule {
 
     pub(in crate::app) fn track_is_cached(&self, track: &TrackSummary) -> bool {
         self.cached_track_ids.contains(&track_cache_key(track))
+    }
+
+    pub(in crate::app) fn track_is_liked(&self, track: &TrackSummary) -> bool {
+        self.liked_track_ids.contains(&track_cache_key(track))
     }
 
     pub(in crate::app) fn enrich_track_list(&self, track_list: &mut TrackList) {

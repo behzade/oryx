@@ -143,6 +143,16 @@ impl Library {
         entities::playlist_track_lists(&connection)
     }
 
+    pub fn liked_track_keys(&self) -> Result<HashSet<String>> {
+        let connection = self.open_connection()?;
+        entities::liked_track_keys(&connection)
+    }
+
+    pub fn toggle_track_liked(&self, track: &TrackSummary) -> Result<bool> {
+        let connection = self.open_connection()?;
+        entities::toggle_liked_track(&connection, track)
+    }
+
     pub fn entity_album_track_lists(&self) -> Result<Vec<TrackList>> {
         let connection = self.open_connection()?;
         entities::album_track_lists(&connection)

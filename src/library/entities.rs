@@ -6,6 +6,11 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::provider::{CollectionKind, CollectionRef, CollectionSummary, TrackList, TrackSummary};
 
+pub(super) const LIKED_PLAYLIST_ID: &str = "liked-tracks";
+const LIKED_PLAYLIST_TITLE: &str = "Liked Tracks";
+const LIKED_PLAYLIST_SUBTITLE: &str = "System playlist";
+const SYSTEM_PLAYLIST_MEMBERSHIP_SOURCE: &str = "system_playlist";
+
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 enum EntityKind {
@@ -590,32 +595,43 @@ pub(super) fn load_collection_track_list(
 }
 
 pub(super) fn playlist_track_lists(connection: &Connection) -> Result<Vec<TrackList>> {
+    let liked_playlist_entity_id = liked_playlist_entity_id();
     let mut statement = connection.prepare(
         r#"
         SELECT provider, canonical_url, entity_id
         FROM library_entities
         WHERE kind = 'playlist' AND provider IS NOT NULL
-        ORDER BY lower(title), lower(coalesce(subtitle, ''))
+        ORDER BY
+            CASE WHEN entity_id = ?1 THEN 0 ELSE 1 END,
+            CASE WHEN provider = ?2 THEN 0 ELSE 1 END,
+            lower(title),
+            lower(coalesce(subtitle, ''))
         "#,
     )?;
 
-    let rows = statement.query_map([], |row| {
-        let provider: String = row.get(0)?;
-        let provider_id = crate::provider::ProviderId::parse(&provider).ok_or_else(|| {
-            rusqlite::Error::FromSqlConversionFailure(
-                0,
-                rusqlite::types::Type::Text,
-                format!("unknown provider '{provider}'").into(),
-            )
-        })?;
-        let entity_id: String = row.get(2)?;
-        Ok::<CollectionRef, rusqlite::Error>(CollectionRef::new(
-            provider_id,
-            canonical_id_from_entity_id(&entity_id).to_string(),
-            CollectionKind::Playlist,
-            row.get(1)?,
-        ))
-    })?;
+    let rows = statement.query_map(
+        params![
+            liked_playlist_entity_id,
+            crate::provider::ProviderId::Local.as_str()
+        ],
+        |row| {
+            let provider: String = row.get(0)?;
+            let provider_id = crate::provider::ProviderId::parse(&provider).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    format!("unknown provider '{provider}'").into(),
+                )
+            })?;
+            let entity_id: String = row.get(2)?;
+            Ok::<CollectionRef, rusqlite::Error>(CollectionRef::new(
+                provider_id,
+                canonical_id_from_entity_id(&entity_id).to_string(),
+                CollectionKind::Playlist,
+                row.get(1)?,
+            ))
+        },
+    )?;
 
     let mut lists = Vec::new();
     for row in rows {
@@ -626,6 +642,117 @@ pub(super) fn playlist_track_lists(connection: &Connection) -> Result<Vec<TrackL
     }
 
     Ok(lists)
+}
+
+pub(super) fn liked_track_keys(connection: &Connection) -> Result<HashSet<String>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT track.provider, membership.track_entity_id
+        FROM library_collection_tracks membership
+        JOIN library_entities track
+            ON track.entity_id = membership.track_entity_id
+        WHERE membership.collection_entity_id = ?1
+        ORDER BY membership.position ASC, membership.created_at ASC
+        "#,
+    )?;
+
+    let rows = statement.query_map(params![liked_playlist_entity_id()], |row| {
+        let provider: String = row.get(0)?;
+        let provider_id = crate::provider::ProviderId::parse(&provider).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                format!("unknown provider '{provider}'").into(),
+            )
+        })?;
+        let track_entity_id: String = row.get(1)?;
+        Ok::<String, rusqlite::Error>(format!(
+            "{}:{}",
+            provider_id.as_str(),
+            canonical_id_from_entity_id(&track_entity_id)
+        ))
+    })?;
+
+    let mut keys = HashSet::new();
+    for row in rows {
+        keys.insert(row?);
+    }
+
+    Ok(keys)
+}
+
+pub(super) fn toggle_liked_track(connection: &Connection, track: &TrackSummary) -> Result<bool> {
+    let playlist = liked_playlist_summary();
+    let playlist_entity_id = liked_playlist_entity_id();
+    let track_entity_id = entity_id_for_track(track);
+
+    upsert_collection_entity(connection, EntityKind::Playlist, &playlist)?;
+
+    let existing_membership = connection
+        .query_row(
+            r#"
+            SELECT 1
+            FROM library_collection_tracks
+            WHERE collection_entity_id = ?1
+              AND track_entity_id = ?2
+              AND membership_source = ?3
+            LIMIT 1
+            "#,
+            params![
+                playlist_entity_id,
+                track_entity_id,
+                SYSTEM_PLAYLIST_MEMBERSHIP_SOURCE
+            ],
+            |_row| Ok(()),
+        )
+        .optional()?
+        .is_some();
+
+    if existing_membership {
+        connection.execute(
+            r#"
+            DELETE FROM library_collection_tracks
+            WHERE collection_entity_id = ?1
+              AND track_entity_id = ?2
+              AND membership_source = ?3
+            "#,
+            params![
+                playlist_entity_id,
+                track_entity_id,
+                SYSTEM_PLAYLIST_MEMBERSHIP_SOURCE
+            ],
+        )?;
+        return Ok(false);
+    }
+
+    upsert_track_entity(connection, track, track.artwork_url.as_deref())?;
+    let next_position = next_playlist_position(
+        connection,
+        &playlist_entity_id,
+        SYSTEM_PLAYLIST_MEMBERSHIP_SOURCE,
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO library_collection_tracks (
+            collection_entity_id,
+            track_entity_id,
+            membership_source,
+            position,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, unixepoch())
+        ON CONFLICT(collection_entity_id, track_entity_id, membership_source) DO UPDATE SET
+            position = excluded.position,
+            updated_at = unixepoch()
+        "#,
+        params![
+            playlist_entity_id,
+            track_entity_id,
+            SYSTEM_PLAYLIST_MEMBERSHIP_SOURCE,
+            next_position
+        ],
+    )?;
+
+    Ok(true)
 }
 
 fn upsert_collection_entity(
@@ -789,6 +916,25 @@ fn inferred_collection_summary(
     })
 }
 
+fn liked_playlist_summary() -> CollectionSummary {
+    CollectionSummary {
+        reference: CollectionRef::new(
+            crate::provider::ProviderId::Local,
+            LIKED_PLAYLIST_ID,
+            CollectionKind::Playlist,
+            None,
+        ),
+        title: LIKED_PLAYLIST_TITLE.to_string(),
+        subtitle: Some(LIKED_PLAYLIST_SUBTITLE.to_string()),
+        artwork_url: None,
+        track_count: None,
+    }
+}
+
+fn liked_playlist_entity_id() -> String {
+    entity_id_for_collection(EntityKind::Playlist, &liked_playlist_summary().reference)
+}
+
 fn entity_id_for_collection(kind: EntityKind, collection: &CollectionRef) -> String {
     format!(
         "{}:{}:{}",
@@ -819,8 +965,28 @@ fn source_rank(source: &str) -> u8 {
     match source {
         "provider_snapshot" => 0,
         "cached_track" => 1,
+        SYSTEM_PLAYLIST_MEMBERSHIP_SOURCE => 2,
         _ => 2,
     }
+}
+
+fn next_playlist_position(
+    connection: &Connection,
+    collection_entity_id: &str,
+    membership_source: &str,
+) -> Result<usize> {
+    let next_position = connection.query_row(
+        r#"
+        SELECT COALESCE(MAX(position) + 1, 0)
+        FROM library_collection_tracks
+        WHERE collection_entity_id = ?1
+          AND membership_source = ?2
+        "#,
+        params![collection_entity_id, membership_source],
+        |row| row.get::<_, usize>(0),
+    )?;
+
+    Ok(next_position)
 }
 
 fn parse_audio_format(value: &str) -> Option<crate::provider::AudioFormat> {
@@ -1068,5 +1234,118 @@ mod tests {
         let albums = album_track_lists(&connection).expect("album track lists");
 
         assert!(albums.is_empty());
+    }
+
+    #[test]
+    fn toggle_liked_track_creates_playlist_and_membership() {
+        let connection = Connection::open_in_memory().expect("in-memory sqlite");
+        initialize_schema(&connection).expect("schema");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE cached_tracks (
+                    provider TEXT NOT NULL,
+                    track_id TEXT NOT NULL,
+                    artist TEXT,
+                    album TEXT,
+                    duration_seconds INTEGER,
+                    bitrate_bps INTEGER,
+                    audio_format TEXT,
+                    artwork_path TEXT
+                );
+                "#,
+            )
+            .expect("cached_tracks table");
+
+        let track = TrackSummary {
+            reference: TrackRef::new(
+                fixture_provider(),
+                "track-1",
+                Some("https://example.com/track-1.mp3".to_string()),
+                Some("Track One".to_string()),
+            ),
+            title: "Track One".to_string(),
+            artist: Some("Artist One".to_string()),
+            album: Some("Album One".to_string()),
+            collection_id: Some("album-1".to_string()),
+            collection_title: Some("Album One".to_string()),
+            collection_subtitle: Some("Artist One".to_string()),
+            duration_seconds: Some(301),
+            bitrate_bps: Some(320_000),
+            audio_format: Some(AudioFormat::Mp3),
+            artwork_url: Some("https://example.com/track.jpg".to_string()),
+        };
+
+        let liked = toggle_liked_track(&connection, &track).expect("toggle like");
+        let keys = liked_track_keys(&connection).expect("liked track keys");
+        let playlists = playlist_track_lists(&connection).expect("playlist track lists");
+
+        assert!(liked);
+        assert!(keys.contains("fixture_remote:track-1"));
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(
+            playlists[0].collection.reference.provider,
+            ProviderId::Local
+        );
+        assert_eq!(playlists[0].collection.reference.id, LIKED_PLAYLIST_ID);
+        assert_eq!(playlists[0].collection.title, LIKED_PLAYLIST_TITLE);
+        assert_eq!(playlists[0].tracks.len(), 1);
+        assert_eq!(
+            playlists[0].tracks[0].reference.provider,
+            fixture_provider()
+        );
+        assert_eq!(playlists[0].tracks[0].reference.id, "track-1");
+    }
+
+    #[test]
+    fn toggle_liked_track_removes_membership_but_keeps_playlist() {
+        let connection = Connection::open_in_memory().expect("in-memory sqlite");
+        initialize_schema(&connection).expect("schema");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE cached_tracks (
+                    provider TEXT NOT NULL,
+                    track_id TEXT NOT NULL,
+                    artist TEXT,
+                    album TEXT,
+                    duration_seconds INTEGER,
+                    bitrate_bps INTEGER,
+                    audio_format TEXT,
+                    artwork_path TEXT
+                );
+                "#,
+            )
+            .expect("cached_tracks table");
+
+        let track = TrackSummary {
+            reference: TrackRef::new(
+                fixture_provider(),
+                "track-1",
+                None,
+                Some("Track One".into()),
+            ),
+            title: "Track One".to_string(),
+            artist: Some("Artist One".to_string()),
+            album: Some("Album One".to_string()),
+            collection_id: Some("album-1".to_string()),
+            collection_title: Some("Album One".to_string()),
+            collection_subtitle: Some("Artist One".to_string()),
+            duration_seconds: Some(301),
+            bitrate_bps: Some(320_000),
+            audio_format: Some(AudioFormat::Mp3),
+            artwork_url: None,
+        };
+
+        assert!(toggle_liked_track(&connection, &track).expect("initial like"));
+        let liked = toggle_liked_track(&connection, &track).expect("toggle unlike");
+        let keys = liked_track_keys(&connection).expect("liked track keys");
+        let playlists = playlist_track_lists(&connection).expect("playlist track lists");
+
+        assert!(!liked);
+        assert!(keys.is_empty());
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].collection.reference.id, LIKED_PLAYLIST_ID);
+        assert!(playlists[0].tracks.is_empty());
     }
 }

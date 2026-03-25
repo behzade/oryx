@@ -11,11 +11,37 @@
 
 ## Ranked Next Work
 
-1. Build a reusable modal/sheet system and move provider auth onto it first. Done.
-2. Add a downloads surface backed by transfer state, likely in that modal. Done.
-3. Move import review into the shared modal once the primitive is proven. Done.
+1. Add track likes as a system-managed playlist shown in the Playlists tab.
+2. Add a replayable Recently Played system playlist so playback history can be revisited directly from the library.
+3. Add an `Open URL...` menu action that opens a separate minimal video window with URL entry, progressive download status, and embedded `mpv` playback.
 4. Polish metadata presentation so shared album/provider/quality information is shown once at the album level instead of repeated on every track row.
 5. Add richer now-playing polish such as a visualizer after the structural UI surfaces settle.
+
+## Priority Features
+
+### Likes Playlist
+
+- Treat likes as a first-class system playlist with stable local identity, not as a per-provider flag.
+- Expose like/unlike actions from track rows and the now-playing surface.
+- Show the resulting liked tracks inside the Playlists tab alongside other local playlists.
+- Preserve likes across restart and across provider/cache refresh so the playlist remains user-owned.
+
+### Recently Played
+
+- Track playback history as a separate system-managed playlist with stable ordering.
+- Append entries when playback actually starts so the list reflects what the user really heard, not just queue intent.
+- Make the history directly playable from the Playlists tab so it can be used as a "go back" surface for recent listening.
+- Keep this distinct from Likes so "saved forever" and "heard recently" remain separate concepts.
+
+### Open URL Video Window
+
+- Add a dedicated `Open URL...` app action in the menu bar.
+- Opening that action should create a completely separate window, not reuse the main library window.
+- The new window should stay minimal: Oryx title bar, URL input + submit, full `mpv` playback surface, and visible download progress.
+- On submit, start a progressive download into `~/Downloads`, explicitly outside the Oryx library/cache.
+- Reuse the progressive download machinery where possible, but keep this path separate from library imports and playback-cache promotion.
+- Launch and control `mpv` inside that same window for video playback while the progressive download continues.
+- Treat this as a separate video-oriented path so the existing `rodio` audio playback stack does not have to absorb video concerns.
 
 ## Import Workflow Polish
 

@@ -384,6 +384,42 @@ impl OryxApp {
         self.transfer_state.read(cx).track_is_downloading(track)
     }
 
+    pub(in crate::app) fn track_is_liked(&self, track: &TrackSummary, cx: &App) -> bool {
+        self.library_catalog.read(cx).track_is_liked(track)
+    }
+
+    pub(in crate::app) fn current_playback_track_summary(&self, cx: &App) -> Option<TrackSummary> {
+        let playback_state = self.playback_state.read(cx);
+        let playback_context = playback_state.playback_context()?;
+        let current_track_index = playback_state.current_track_index()?;
+
+        playback_context.tracks.get(current_track_index).cloned()
+    }
+
+    pub(in crate::app) fn toggle_track_like(
+        &mut self,
+        track: TrackSummary,
+        cx: &mut Context<Self>,
+    ) {
+        match self.library.toggle_track_liked(&track) {
+            Ok(liked) => {
+                self.refresh_local_library_views(cx);
+                self.status_message = Some(if liked {
+                    format!("Added '{}' to Liked Tracks.", track.title)
+                } else {
+                    format!("Removed '{}' from Liked Tracks.", track.title)
+                });
+                self.persist_session_snapshot(cx);
+            }
+            Err(error) => {
+                let message = format!("Failed to update likes for '{}': {error}", track.title);
+                self.status_message = Some(message.clone());
+                self.show_notification(message, NotificationLevel::Error, cx);
+            }
+        }
+        cx.notify();
+    }
+
     fn remove_track_from_playback_context(
         &mut self,
         provider: ProviderId,
