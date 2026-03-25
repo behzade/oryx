@@ -6,7 +6,7 @@ Oryx supports a local library plus configurable remote providers. Remote provide
 
 ## License and Distribution
 
-The source code in this repository is source-available under [PolyForm Strict 1.0.0](./license).
+The source code in this repository is source-available under [PolyForm Strict 1.0.0](./LICENSE).
 
 - official builds are published only by the maintainer
 - public issue reports are welcome
@@ -44,7 +44,7 @@ Provider config import/export is supported from the app menu using a compact pro
 
 This repository does not ship provider manifests.
 
-See [docs/provider-config.md](/Users/behzad/Projects/personal/oryx/docs/provider-config.md) for the manifest format.
+See [docs/provider-config.md](./docs/provider-config.md) for the manifest format.
 
 ## Prerequisites
 

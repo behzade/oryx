@@ -1,6 +1,6 @@
 # Contributing
 
-This repository is public for transparency, issue reporting, and official release automation. It is not an open collaboration project.
+This repository is public for transparency, issue reporting, and source distribution. It is not an open collaboration project.
 
 ## What Is Welcome
 
@@ -13,7 +13,6 @@ This repository is public for transparency, issue reporting, and official releas
 ## What Is Not Being Accepted
 
 - pull requests
-- drive-by patches
 - unsolicited large code changes
 - redistributed builds presented as official
 
