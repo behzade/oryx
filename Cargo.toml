@@ -1,0 +1,42 @@
+[package]
+name = "oryx"
+version = "0.1.1"
+edition = "2024"
+default-run = "oryx"
+
+[dependencies]
+anyhow = "1.0.98"
+async-trait = "0.1.89"
+base64 = "0.22.1"
+chromaprint = { package = "chromaprint-next", version = "0.1" }
+dirs = "5.0.1"
+gpui = "0.2.2"
+html-escape = "0.2.13"
+lofty = "0.22"
+raw-window-handle = "0.6.2"
+rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "4aa22e85e5ad5565c45dfdda95051158eb6b56c3", features = ["symphonia-libopus"] }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+scraper = "0.24.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.9"
+signal-hook = "0.3.18"
+souvlaki = "0.8.3"
+toml = "0.9.8"
+ureq = { version = "2.12.1", features = ["proxy-from-env"] }
+url = "2.5.8"
+zstd = "0.13.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.4", features = ["std"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSImage", "NSImageRep"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSGeometry", "NSProcessInfo", "NSString"] }
+
+[package.metadata.packager]
+product-name = "Oryx"
+identifier = "dev.oryx.app"
+category = "Music"
+formats = ["dmg"]
+icons = ["assets/icons/app/icon_512x512@2x.png"]
+binaries = [{ path = "oryx", main = true }]
+before-packaging-command = "cargo build --release --bin oryx"
