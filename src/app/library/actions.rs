@@ -28,14 +28,9 @@ impl OryxApp {
         cx: &mut Context<Self>,
         update: impl FnOnce(&mut ImportReview),
     ) -> bool {
-        let updated = self.ui_state.update(cx, |state, _cx| {
-            let Some(review) = state.pending_import_review.as_mut() else {
-                return false;
-            };
-            update(review);
-            review.refresh_album_summaries();
-            true
-        });
+        let updated = self
+            .ui_state
+            .update(cx, |state, _cx| state.update_pending_import_review(update));
         if updated {
             self.sync_import_review_text_inputs(cx);
         }

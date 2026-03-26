@@ -36,7 +36,7 @@ use super::{
     render_icon_with_color,
 };
 
-const TOPBAR_SIDE_SLOT_WIDTH: f32 = 96.0;
+const TOPBAR_SIDE_SLOT_WIDTH: f32 = 176.0;
 const DISCOVERY_COLUMN_MIN_WIDTH: f32 = 340.0;
 const DISCOVERY_COLUMN_MAX_WIDTH: f32 = 420.0;
 const DISCOVERY_COLUMN_RATIO: f32 = 0.33;

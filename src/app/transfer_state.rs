@@ -127,15 +127,6 @@ impl TransferStateModel {
         self.cancelled_downloads.contains(track_id)
     }
 
-    pub(super) fn active_download_count(&self) -> usize {
-        self.downloads.len()
-            + self
-                .external_downloads
-                .iter()
-                .filter(|item| item.is_active())
-                .count()
-    }
-
     pub(super) fn download_items(&self) -> Vec<DownloadItem> {
         let mut items = self
             .external_downloads

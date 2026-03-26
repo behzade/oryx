@@ -12,6 +12,9 @@ impl OryxApp {
     ) -> Div {
         shell
             .child(self.render_notifications(window, cx))
+            .when(self.ui_state.read(cx).app_menu_open(), |shell| {
+                shell.child(self.render_app_menu_overlay(window, cx))
+            })
             .when(self.ui_state.read(cx).downloads_modal_open(), |shell| {
                 shell.child(self.render_downloads_modal(cx))
             })

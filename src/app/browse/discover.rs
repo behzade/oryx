@@ -59,45 +59,74 @@ impl OryxApp {
     }
 
     fn render_topbar_actions(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let download_count = self.transfer_state.read(cx).active_download_count();
-        let label = if download_count == 0 {
-            "Downloads".to_string()
-        } else {
-            format!("{download_count}")
-        };
-
+        let app_menu_open = self.ui_state.read(cx).app_menu_open();
         div()
-            .px(px(theme::SPACE_2))
-            .py(px(theme::SPACE_2))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(rgb(if self.ui_state.read(cx).downloads_modal_open() {
-                theme::ACCENT_PRIMARY
-            } else {
-                theme::BORDER_SUBTLE
-            }))
-            .bg(rgb(theme::SURFACE_FLOATING))
-            .cursor_pointer()
             .flex()
             .items_center()
             .gap(px(theme::SPACE_2))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
-                    this.toggle_downloads_modal(cx);
-                }),
-            )
-            .child(render_icon_with_color(
-                AppIcon::Download,
-                14.,
-                theme::TEXT_MUTED,
-            ))
             .child(
                 div()
-                    .text_size(px(theme::SMALL_SIZE))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(theme::TEXT_MUTED))
-                    .child(label),
+                    .px(px(theme::SPACE_2))
+                    .py(px(theme::SPACE_2))
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_color(rgb(if app_menu_open {
+                        theme::ACCENT_PRIMARY
+                    } else {
+                        theme::BORDER_SUBTLE
+                    }))
+                    .bg(rgb(theme::SURFACE_FLOATING))
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(render_icon_with_color(
+                        AppIcon::Menu,
+                        16.,
+                        if app_menu_open {
+                            theme::ACCENT_PRIMARY
+                        } else {
+                            theme::TEXT_MUTED
+                        },
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                            this.toggle_app_menu(cx);
+                        }),
+                    ),
+            )
+            .child(
+                div()
+                    .px(px(theme::SPACE_2))
+                    .py(px(theme::SPACE_2))
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_color(rgb(if self.ui_state.read(cx).downloads_modal_open() {
+                        theme::ACCENT_PRIMARY
+                    } else {
+                        theme::BORDER_SUBTLE
+                    }))
+                    .bg(rgb(theme::SURFACE_FLOATING))
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                            this.toggle_downloads_modal(cx);
+                        }),
+                    )
+                    .child(render_icon_with_color(
+                        AppIcon::Download,
+                        16.,
+                        if self.ui_state.read(cx).downloads_modal_open() {
+                            theme::ACCENT_PRIMARY
+                        } else {
+                            theme::TEXT_MUTED
+                        },
+                    )),
             )
     }
 

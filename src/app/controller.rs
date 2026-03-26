@@ -34,6 +34,12 @@ impl OryxApp {
             self.handle_provider_auth_key_down(event, focused_input, window, cx);
             return;
         }
+        if self.ui_state.read(cx).app_menu_open() {
+            if !event.keystroke.modifiers.function && event.keystroke.key.as_str() == "escape" {
+                self.close_app_menu(cx);
+            }
+            return;
+        }
 
         let Some(intent) = Self::key_down_intent(event, focused_input) else {
             return;

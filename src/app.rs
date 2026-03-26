@@ -16,7 +16,7 @@ use gpui::prelude::*;
 use gpui::{
     App, Application, AsyncApp, Bounds, Context, Entity, Pixels, Styled, Subscription,
     TitlebarOptions, WeakEntity, WindowBackgroundAppearance, WindowBounds, WindowDecorations,
-    WindowOptions, div, point, px, rgb, size, svg,
+    WindowOptions, div, px, rgb, size, svg,
 };
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
@@ -116,7 +116,7 @@ fn main_window_titlebar() -> Option<TitlebarOptions> {
         Some(TitlebarOptions {
             title: None,
             appears_transparent: true,
-            traffic_light_position: Some(point(px(12.0), px(12.0))),
+            traffic_light_position: Some(gpui::point(px(12.0), px(12.0))),
         })
     }
 
@@ -440,6 +440,9 @@ impl OryxApp {
         {
             return;
         }
+        self.update_ui_state(cx, |state| {
+            state.close_app_menu();
+        });
         self.discover.update(cx, |discover, _cx| {
             discover.toggle_source_picker();
         });
@@ -544,6 +547,36 @@ impl OryxApp {
     fn quit_app(&mut self, cx: &mut Context<Self>) {
         self.persist_current_playback_position(cx);
         cx.quit();
+    }
+
+    fn toggle_app_menu(&mut self, cx: &mut Context<Self>) {
+        if self.ui_state.read(cx).provider_auth_prompt().is_some()
+            || self.ui_state.read(cx).provider_link_prompt().is_some()
+            || self.ui_state.read(cx).open_url_prompt_open()
+            || self.ui_state.read(cx).import_review_loading()
+            || self.ui_state.read(cx).pending_import_review().is_some()
+        {
+            return;
+        }
+
+        self.discover.update(cx, |discover, _cx| {
+            discover.close_source_picker();
+        });
+        self.update_ui_state(cx, |state| {
+            state.close_downloads_modal();
+            state.close_context_menu();
+            state.toggle_app_menu();
+        });
+        cx.notify();
+    }
+
+    fn close_app_menu(&mut self, cx: &mut Context<Self>) {
+        let closed = self
+            .ui_state
+            .update(cx, |state, _cx| state.close_app_menu());
+        if closed {
+            cx.notify();
+        }
     }
 
     fn spawn_media_control_listener(
@@ -735,6 +768,7 @@ pub(super) enum AppIcon {
     RepeatAll,
     RepeatOne,
     Music,
+    Menu,
     Heart,
     HeartFilled,
     Download,
@@ -755,6 +789,7 @@ impl AppIcon {
             Self::RepeatAll => "icons/lucide/repeat-2.svg",
             Self::RepeatOne => "icons/lucide/repeat-1.svg",
             Self::Music => "icons/lucide/music-4.svg",
+            Self::Menu => "icons/lucide/menu.svg",
             Self::Heart => "icons/lucide/heart.svg",
             Self::HeartFilled => "icons/lucide/heart-filled.svg",
             Self::Download => "icons/lucide/download.svg",
