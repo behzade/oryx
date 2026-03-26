@@ -64,6 +64,10 @@ pub struct PersistedExternalDownload {
     pub destination: Option<std::path::PathBuf>,
     #[serde(default)]
     pub paused: bool,
+    #[serde(default)]
+    pub downloaded_bytes: Option<u64>,
+    #[serde(default)]
+    pub total_bytes: Option<u64>,
     pub state: PersistedExternalDownloadState,
 }
 

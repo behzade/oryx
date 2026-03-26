@@ -51,6 +51,7 @@ See [docs/provider-config.md](./docs/provider-config.md) for the manifest format
 - Rust toolchain from `rustup`
 - `cargo packager` installed locally: `cargo install cargo-packager --locked`
 - `ffmpeg` and `ffprobe` on `PATH` for import normalization and media probing
+- `yt-dlp` available at runtime for the `Open Media...` flow to resolve downloadable media URLs
 
 ## Development
 
@@ -65,6 +66,12 @@ Run tests:
 ```bash
 cargo test
 ```
+
+## Open Media
+
+`Open Media...` resolves media URLs with `yt-dlp`, downloads them into `~/Downloads`, and opens completed files with the operating system's default app for that media type.
+
+Oryx is not bound to `mpv` here. The external opener is intentionally generic, and a user-configurable opener can be added later.
 
 ## Packaging
 

@@ -389,34 +389,39 @@ impl TransferStateModel {
     pub(super) fn persisted_external_downloads(&self) -> Vec<PersistedExternalDownload> {
         self.external_downloads
             .iter()
-            .map(|item| PersistedExternalDownload {
-                id: item.id.clone(),
-                title: item.title.clone(),
-                source_url: item
-                    .source_url()
-                    .expect("external download should always retain its source URL")
-                    .to_string(),
-                destination: item.destination().cloned(),
-                paused: item
-                    .progress()
-                    .is_some_and(|progress| progress.snapshot().paused),
-                state: match &item.state {
-                    DownloadItemState::Queued { .. } | DownloadItemState::Active { .. } => {
-                        PersistedExternalDownloadState::Pending
-                    }
-                    DownloadItemState::Completed {
-                        source_url: _,
-                        destination,
-                    } => PersistedExternalDownloadState::Completed {
-                        destination: destination.clone(),
+            .map(|item| {
+                let snapshot = item.progress().map(ProgressiveDownload::snapshot);
+                PersistedExternalDownload {
+                    id: item.id.clone(),
+                    title: item.title.clone(),
+                    source_url: item
+                        .source_url()
+                        .expect("external download should always retain its source URL")
+                        .to_string(),
+                    destination: item.destination().cloned(),
+                    paused: snapshot.is_some_and(|snapshot| snapshot.paused),
+                    downloaded_bytes: snapshot
+                        .map(|snapshot| snapshot.downloaded_bytes)
+                        .filter(|bytes| *bytes > 0),
+                    total_bytes: snapshot.and_then(|snapshot| snapshot.total_bytes),
+                    state: match &item.state {
+                        DownloadItemState::Queued { .. } | DownloadItemState::Active { .. } => {
+                            PersistedExternalDownloadState::Pending
+                        }
+                        DownloadItemState::Completed {
+                            source_url: _,
+                            destination,
+                        } => PersistedExternalDownloadState::Completed {
+                            destination: destination.clone(),
+                        },
+                        DownloadItemState::Failed {
+                            destination, error, ..
+                        } => PersistedExternalDownloadState::Failed {
+                            destination: destination.clone(),
+                            error: error.clone(),
+                        },
                     },
-                    DownloadItemState::Failed {
-                        destination, error, ..
-                    } => PersistedExternalDownloadState::Failed {
-                        destination: destination.clone(),
-                        error: error.clone(),
-                    },
-                },
+                }
             })
             .collect()
     }
@@ -574,6 +579,8 @@ mod tests {
                 source_url: "https://example.com/pending".to_string(),
                 destination: Some(PathBuf::from("/tmp/pending.mp4")),
                 paused: true,
+                downloaded_bytes: Some(128),
+                total_bytes: Some(512),
                 state: PersistedExternalDownloadState::Pending,
             },
             PersistedExternalDownload {
@@ -582,6 +589,8 @@ mod tests {
                 source_url: "https://example.com/done".to_string(),
                 destination: Some(PathBuf::from("/tmp/done.mp4")),
                 paused: false,
+                downloaded_bytes: None,
+                total_bytes: None,
                 state: PersistedExternalDownloadState::Completed {
                     destination: PathBuf::from("/tmp/done.mp4"),
                 },

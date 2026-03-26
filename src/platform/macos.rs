@@ -233,7 +233,7 @@ fn setup_native_main_menu(cx: &mut App) {
         Menu {
             name: "File".into(),
             items: vec![
-                MenuItem::action("Open URL...", OpenUrl),
+                MenuItem::action("Open Media...", OpenUrl),
                 MenuItem::action("Import...", ImportFolder),
                 MenuItem::action("Import Provider Link...", ImportProviderLink),
                 MenuItem::action("Export Provider Link...", ExportProviderLink),

@@ -215,7 +215,8 @@ impl TransferManager {
             next_external_download_id(),
             source_url,
             None,
-            false,
+            None,
+            None,
         );
     }
 
@@ -224,14 +225,12 @@ impl TransferManager {
         download_id: String,
         source_url: String,
         preferred_destination: Option<PathBuf>,
-        start_paused: bool,
+        progress: Option<ProgressiveDownload>,
+        queued_title: Option<String>,
     ) {
         let event_tx = self.event_tx.clone();
-        let queued_title = fallback_title_for_url(&source_url);
-        let progress = ProgressiveDownload::new();
-        if start_paused {
-            progress.pause();
-        }
+        let queued_title = queued_title.unwrap_or_else(|| fallback_title_for_url(&source_url));
+        let progress = progress.unwrap_or_else(ProgressiveDownload::new);
         let _ = event_tx.send(TransferEvent::ExternalDownloadQueued {
             download_id: download_id.clone(),
             title: queued_title,

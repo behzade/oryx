@@ -151,16 +151,33 @@ pub(crate) fn download_video_to_path(
     Ok(())
 }
 
-pub(crate) fn launch_mpv(path: &Path) -> Result<()> {
-    let mut command = Command::new(preferred_binary(
-        "mpv",
-        &["/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"],
-    ));
-    command.arg(path);
+pub(crate) fn open_media_with_default_app(path: &Path) -> Result<()> {
+    let mut command = default_open_command(path);
     command
         .spawn()
-        .with_context(|| format!("Failed to launch mpv for {}", path.display()))?;
+        .with_context(|| format!("Failed to open {} with the default app", path.display()))?;
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn default_open_command(path: &Path) -> Command {
+    let mut command = Command::new("open");
+    command.arg(path);
+    command
+}
+
+#[cfg(target_os = "windows")]
+fn default_open_command(path: &Path) -> Command {
+    let mut command = Command::new("cmd");
+    command.arg("/C").arg("start").arg("").arg(path);
+    command
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn default_open_command(path: &Path) -> Command {
+    let mut command = Command::new("xdg-open");
+    command.arg(path);
+    command
 }
 
 pub(crate) fn fallback_title_for_url(url: &str) -> String {
@@ -169,7 +186,7 @@ pub(crate) fn fallback_title_for_url(url: &str) -> String {
         .and_then(|parsed| {
             parsed
                 .host_str()
-                .map(|host| format!("Open URL ({host})"))
+                .map(|host| format!("Open Media ({host})"))
                 .or_else(|| {
                     parsed
                         .path_segments()
@@ -178,7 +195,7 @@ pub(crate) fn fallback_title_for_url(url: &str) -> String {
                 })
         })
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "Open URL".to_string())
+        .unwrap_or_else(|| "Open Media".to_string())
 }
 
 #[derive(Debug, Deserialize)]

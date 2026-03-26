@@ -7,8 +7,9 @@ use gpui::{
 };
 
 use crate::library::{PersistedExternalDownload, PersistedExternalDownloadState};
+use crate::progressive::ProgressiveDownload;
 use crate::theme;
-use crate::url_media::{launch_mpv, validate_open_url_input};
+use crate::url_media::{open_media_with_default_app, validate_open_url_input};
 
 use super::OryxApp;
 use super::text_input::{TextInputElement, TextInputId};
@@ -35,11 +36,13 @@ impl OryxApp {
             state.restore_persisted_external_downloads(retained);
         });
         for download in pending {
+            let progress = restored_external_download_progress(&download);
             self.transfer.queue_external_url_download_with_id(
                 download.id,
                 download.source_url,
                 download.destination,
-                download.paused,
+                Some(progress),
+                Some(download.title),
             );
         }
     }
@@ -52,7 +55,8 @@ impl OryxApp {
         self.update_ui_state(cx, |state| state.open_open_url_prompt());
         self.focus_text_input(&TextInputId::OpenUrl, window);
         self.status_message = Some(
-            "Paste a video URL to queue it in Downloads and open it later in mpv.".to_string(),
+            "Paste a media URL to queue it in Downloads and open it with your default app."
+                .to_string(),
         );
         cx.notify();
     }
@@ -64,8 +68,8 @@ impl OryxApp {
 
         self.open_url_input.reset(String::new());
         self.update_ui_state(cx, |state| state.reset_open_url_prompt());
-        self.status_message = Some("Open URL cancelled.".to_string());
-        self.show_notification("Open URL cancelled.", NotificationLevel::Info, cx);
+        self.status_message = Some("Open Media cancelled.".to_string());
+        self.show_notification("Open Media cancelled.", NotificationLevel::Info, cx);
         cx.notify();
     }
 
@@ -170,20 +174,16 @@ impl OryxApp {
         cx.notify();
     }
 
-    pub(super) fn open_external_download_in_mpv(
-        &mut self,
-        destination: PathBuf,
-        cx: &mut Context<Self>,
-    ) {
-        match launch_mpv(&destination) {
+    pub(super) fn open_external_download(&mut self, destination: PathBuf, cx: &mut Context<Self>) {
+        match open_media_with_default_app(&destination) {
             Ok(()) => {
-                let message = format!("Opened '{}' in mpv.", destination.display());
+                let message = format!("Opened '{}' with the default app.", destination.display());
                 self.status_message = Some(message.clone());
                 self.show_notification(message, NotificationLevel::Info, cx);
             }
             Err(error) => {
                 let message = format!(
-                    "Failed to open '{}' in mpv: {error:#}",
+                    "Failed to open '{}' with the default app: {error:#}",
                     destination.display()
                 );
                 self.status_message = Some(message.clone());
@@ -203,7 +203,8 @@ impl OryxApp {
             download_id,
             source_url.clone(),
             destination,
-            false,
+            None,
+            None,
         );
         self.status_message = Some(format!("Retrying '{source_url}'."));
         self.persist_session_snapshot(cx);
@@ -285,14 +286,14 @@ impl OryxApp {
                                     .text_size(px(20.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme::TEXT_PRIMARY))
-                                    .child("Open URL".to_string()),
+                                    .child("Open Media".to_string()),
                             )
                             .child(
                                 div()
                                     .text_size(px(theme::META_SIZE))
                                     .text_color(rgb(theme::TEXT_MUTED))
                                     .child(
-                                        "Paste a video URL. Oryx will download it into ~/Downloads and add it to Downloads with an Open button for mpv."
+                                        "Paste a media URL. Oryx will download it into ~/Downloads and add it to Downloads with an Open button."
                                             .to_string(),
                                     ),
                             ),
@@ -361,4 +362,20 @@ impl OryxApp {
             }),
         )
     }
+}
+
+fn restored_external_download_progress(
+    download: &PersistedExternalDownload,
+) -> ProgressiveDownload {
+    let progress = ProgressiveDownload::new();
+    if let Some(total_bytes) = download.total_bytes {
+        progress.set_total_bytes(Some(total_bytes));
+    }
+    if let Some(downloaded_bytes) = download.downloaded_bytes.filter(|bytes| *bytes > 0) {
+        progress.report_progress(downloaded_bytes);
+    }
+    if download.paused {
+        progress.pause();
+    }
+    progress
 }

@@ -23,7 +23,7 @@ use crate::url_media::fallback_download_name;
 
 use self::rows::{
     action_button, audio_quality_from_track_summary, collection_quality_metadata,
-    download_progress_label, download_progress_ratio, metadata_label, render_collection_artwork,
+    download_progress_ratio, metadata_label, render_collection_artwork,
     summarize_track_list_quality, vertical_divider,
 };
 use super::library::{AudioQuality, CollectionQualitySummary, normalized_audio_quality_grade};
@@ -1003,13 +1003,6 @@ impl OryxApp {
                         .unwrap_or_else(|| error.clone()),
                 };
                 let metadata_line = download_metadata_line(&download.state, snapshot);
-                let status_label = match &download.state {
-                    DownloadItemState::Queued { .. } if is_paused => "Paused".to_string(),
-                    DownloadItemState::Queued { .. } => "Resolving URL…".to_string(),
-                    DownloadItemState::Active { .. } => download_progress_label(snapshot),
-                    DownloadItemState::Completed { .. } => "Ready to open".to_string(),
-                    DownloadItemState::Failed { error, .. } => error.clone(),
-                };
                 let stream_action = match (&download.state, snapshot, download.purpose) {
                     (
                         DownloadItemState::Active {
@@ -1031,15 +1024,6 @@ impl OryxApp {
                         .border_1()
                         .border_color(rgb(theme::BORDER_SUBTLE))
                         .bg(rgb(theme::SURFACE_BASE))
-                        .overflow_hidden()
-                        .when(snapshot.is_some(), |card| {
-                            card.child(
-                                div()
-                                    .h(px(3.))
-                                    .w(relative(progress_ratio.clamp(0.0, 1.0)))
-                                    .bg(rgb(theme::DOWNLOAD_PROGRESS)),
-                            )
-                        })
                         .child(
                             div()
                                 .px(px(theme::SPACE_3))
@@ -1048,58 +1032,54 @@ impl OryxApp {
                                 .flex_col()
                                 .gap(px(theme::SPACE_3))
                                 .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .gap(px(theme::SPACE_3))
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .flex()
-                                                .flex_col()
-                                                .gap(px(2.))
-                                                .child(
-                                                    div()
-                                                        .text_size(px(theme::BODY_SIZE))
-                                                        .font_weight(FontWeight::SEMIBOLD)
-                                                        .truncate()
-                                                        .child(download_title),
-                                                )
-                                                .child(
+                                    div().flex().items_center().gap(px(theme::SPACE_3)).child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(2.))
+                                            .child(
+                                                div()
+                                                    .text_size(px(theme::BODY_SIZE))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .truncate()
+                                                    .child(download_title),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(theme::SMALL_SIZE))
+                                                    .text_color(rgb(theme::TEXT_DIM))
+                                                    .truncate()
+                                                    .child(secondary_line),
+                                            )
+                                            .when_some(metadata_line, |column, metadata_line| {
+                                                column.child(
                                                     div()
                                                         .text_size(px(theme::SMALL_SIZE))
-                                                        .text_color(rgb(theme::TEXT_DIM))
+                                                        .text_color(rgb(theme::TEXT_MUTED))
                                                         .truncate()
-                                                        .child(secondary_line),
+                                                        .child(metadata_line),
                                                 )
-                                                .when_some(
-                                                    metadata_line,
-                                                    |column, metadata_line| {
-                                                        column.child(
-                                                            div()
-                                                                .text_size(px(theme::SMALL_SIZE))
-                                                                .text_color(rgb(theme::TEXT_MUTED))
-                                                                .truncate()
-                                                                .child(metadata_line),
-                                                        )
-                                                    },
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_size(px(theme::SMALL_SIZE))
-                                                .text_color(rgb(match &download.state {
-                                                    DownloadItemState::Failed { .. } => {
-                                                        theme::ACCENT_PRIMARY
-                                                    }
-                                                    _ => theme::DOWNLOAD_PROGRESS,
-                                                }))
-                                                .child(status_label),
-                                        ),
+                                            }),
+                                    ),
                                 )
+                                .when(snapshot.is_some(), |card| {
+                                    card.child(
+                                        div()
+                                            .w_full()
+                                            .h(px(3.))
+                                            .overflow_hidden()
+                                            .bg(rgb(theme::DOWNLOAD_PROGRESS_LIGHT))
+                                            .child(
+                                                div()
+                                                    .h_full()
+                                                    .w(relative(progress_ratio.clamp(0.0, 1.0)))
+                                                    .bg(rgb(theme::DOWNLOAD_PROGRESS)),
+                                            ),
+                                    )
+                                })
                                 .when(
                                     is_external_pending
                                         || stream_action.is_some()
@@ -1110,7 +1090,7 @@ impl OryxApp {
                                         ),
                                     |card| {
                                         let actions =
-                                            div().flex().justify_end().gap(px(theme::SPACE_2));
+                                            div().flex().justify_center().gap(px(theme::SPACE_2));
                                         let actions = if is_external_pending {
                                             let pause_icon = if is_paused {
                                                 AppIcon::Play
@@ -1161,7 +1141,7 @@ impl OryxApp {
                                                                   _event: &MouseDownEvent,
                                                                   _window,
                                                                   cx| {
-                                                                this.open_external_download_in_mpv(
+                                                                this.open_external_download(
                                                                     destination.clone(),
                                                                     cx,
                                                                 );
@@ -1218,7 +1198,7 @@ impl OryxApp {
                                                                   _event: &MouseDownEvent,
                                                                   _window,
                                                                   cx| {
-                                                                this.open_external_download_in_mpv(
+                                                                this.open_external_download(
                                                                     destination.clone(),
                                                                     cx,
                                                                 );

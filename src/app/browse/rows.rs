@@ -76,32 +76,23 @@ pub(super) fn download_progress_ratio(snapshot: ProgressiveSnapshot) -> Option<f
         .map(|total| (snapshot.downloaded_bytes as f32 / total as f32).clamp(0.0, 1.0))
 }
 
-pub(super) fn download_progress_label(snapshot: Option<ProgressiveSnapshot>) -> String {
-    match snapshot {
-        Some(snapshot) if snapshot.paused => "Paused".to_string(),
-        Some(snapshot) if snapshot.retrying => "Retrying…".to_string(),
-        Some(snapshot) => match download_progress_ratio(snapshot) {
-            Some(ratio) => format!("{}%", (ratio * 100.0).round() as u32),
-            None => "Downloading".to_string(),
-        },
-        None => "Downloading".to_string(),
-    }
-}
-
 pub(super) fn render_download_progress_line(snapshot: ProgressiveSnapshot) -> gpui::Div {
     let ratio = download_progress_ratio(snapshot).unwrap_or(0.0);
 
     div()
         .absolute()
-        .top_0()
-        .left_0()
-        .right(px(0.))
-        .h(px(3.))
+        .top(px(1.))
+        .left(px(8.))
+        .right(px(8.))
+        .h(px(2.))
+        .rounded(px(999.))
+        .overflow_hidden()
         .bg(rgb(theme::DOWNLOAD_PROGRESS_LIGHT))
         .child(
             div()
                 .w(relative(ratio.clamp(0.0, 1.0)))
                 .h_full()
+                .rounded(px(999.))
                 .bg(rgb(theme::DOWNLOAD_PROGRESS)),
         )
 }

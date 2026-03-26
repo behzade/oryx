@@ -244,7 +244,7 @@ impl OryxApp {
             }
             TransferEvent::ExternalDownloadCancelled { .. } => {}
             TransferEvent::ExternalDownloadFailed { title, error, .. } => {
-                let message = format!("Open URL download failed for '{}': {error}", title);
+                let message = format!("Open Media download failed for '{}': {error}", title);
                 self.status_message = Some(message.clone());
                 self.show_notification(message, NotificationLevel::Error, cx);
             }

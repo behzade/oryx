@@ -13,7 +13,7 @@
 
 1. Add track likes as a system-managed playlist shown in the Playlists tab.
 2. Add a replayable Recently Played system playlist so playback history can be revisited directly from the library.
-3. Add an `Open URL...` menu action that opens a separate minimal video window with URL entry, progressive download status, and embedded `mpv` playback.
+3. Add an `Open Media...` entry flow that resolves media URLs, downloads them into `~/Downloads`, and opens completed files with the system default app.
 4. Polish metadata presentation so shared album/provider/quality information is shown once at the album level instead of repeated on every track row.
 5. Add richer now-playing polish such as a visualizer after the structural UI surfaces settle.
 
@@ -33,15 +33,15 @@
 - Make the history directly playable from the Playlists tab so it can be used as a "go back" surface for recent listening.
 - Keep this distinct from Likes so "saved forever" and "heard recently" remain separate concepts.
 
-### Open URL Video Window
+### Open Media
 
-- Add a dedicated `Open URL...` app action in the menu bar.
-- Opening that action should create a completely separate window, not reuse the main library window.
-- The new window should stay minimal: Oryx title bar, URL input + submit, full `mpv` playback surface, and visible download progress.
+- Add a dedicated `Open Media...` app action in the menu bar.
+- Open a compact in-app URL prompt rather than a separate video window.
 - On submit, start a progressive download into `~/Downloads`, explicitly outside the Oryx library/cache.
+- Surface progress, retry, pause, cancel, and open actions from the Downloads modal.
 - Reuse the progressive download machinery where possible, but keep this path separate from library imports and playback-cache promotion.
-- Launch and control `mpv` inside that same window for video playback while the progressive download continues.
-- Treat this as a separate video-oriented path so the existing `rodio` audio playback stack does not have to absorb video concerns.
+- Resolve media URLs with `yt-dlp`, but open completed files with the operating system's default app instead of binding the feature to a specific player.
+- Leave room for a configurable external opener later without coupling the feature to `mpv` or the internal audio stack.
 
 ## Import Workflow Polish
 

@@ -45,7 +45,6 @@ pub struct ProgressiveSnapshot {
     pub total_bytes: Option<u64>,
     pub complete: bool,
     pub paused: bool,
-    pub retrying: bool,
 }
 
 impl ProgressiveDownload {
@@ -232,7 +231,6 @@ impl ProgressiveDownload {
             total_bytes: state.total_len,
             complete: state.complete,
             paused: state.paused,
-            retrying: state.retrying,
         }
     }
 
