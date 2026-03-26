@@ -10,6 +10,7 @@ use anyhow::{Context as _, Result};
 use serde::Deserialize;
 use url::Url;
 
+use crate::pathing::sanitize_path_component;
 use crate::progressive::ProgressiveDownload;
 use crate::provider::{DownloadRequest, HttpHeader, network_agent};
 
@@ -288,6 +289,8 @@ pub(crate) fn fallback_download_name(source_url: &str) -> String {
         .and_then(|url| {
             url.path_segments()
                 .and_then(|segments| segments.rev().find(|segment| !segment.is_empty()))
+                .and_then(|segment| Path::new(segment).file_stem())
+                .and_then(OsStr::to_str)
                 .map(sanitize_path_component)
         })
         .filter(|name| !name.is_empty())
@@ -307,31 +310,6 @@ fn sanitize_extension(extension: Option<&str>) -> String {
         })
         .filter(|extension| !extension.is_empty())
         .unwrap_or_else(|| "mp4".to_string())
-}
-
-fn sanitize_path_component(input: &str) -> String {
-    let mut sanitized = String::with_capacity(input.len());
-    for ch in input.chars() {
-        let replacement = match ch {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-            c if c.is_control() => '_',
-            c => c,
-        };
-        sanitized.push(replacement);
-    }
-
-    let sanitized = sanitized
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim_matches(['.', ' '])
-        .to_string();
-
-    if sanitized.is_empty() {
-        "Untitled".to_string()
-    } else {
-        sanitized
-    }
 }
 
 fn extension_from_url(url: &str) -> Option<&str> {
@@ -791,16 +769,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitize_path_component_replaces_invalid_characters() {
-        assert_eq!(sanitize_path_component("a/b:c*"), "a_b_c_");
+    fn fallback_download_name_uses_url_stem() {
+        assert_eq!(
+            fallback_download_name("https://example.com/path/video.mp4?x=1"),
+            "video"
+        );
     }
 
     #[test]
-    fn fallback_download_name_uses_url_tail() {
-        assert_eq!(
-            fallback_download_name("https://example.com/path/video.mp4?x=1"),
-            "video.mp4"
+    fn build_download_destination_does_not_duplicate_extension_from_url_fallback() {
+        let destination = build_download_destination(
+            Path::new("/tmp"),
+            None,
+            None,
+            "https://example.com/path/video.mp4?x=1",
+            None,
         );
+
+        assert_eq!(destination, Path::new("/tmp").join("video.mp4"));
     }
 
     #[test]

@@ -5,6 +5,7 @@ mod keybindings;
 mod library;
 mod metadata;
 mod model;
+mod pathing;
 mod platform;
 mod progressive;
 mod provider;

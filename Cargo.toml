@@ -1,6 +1,6 @@
 [package]
 name = "oryx"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 default-run = "oryx"
 license-file = "LICENSE"
@@ -37,7 +37,9 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 product-name = "Oryx"
 identifier = "dev.oryx.app"
 category = "Music"
-formats = ["dmg"]
 icons = ["assets/icons/app/icon_512x512@2x.png"]
 binaries = [{ path = "oryx", main = true }]
-before-packaging-command = "cargo build --release --bin oryx"
+before-packaging-command = "cargo build --release --locked --bin oryx"
+
+[package.metadata.packager.appimage]
+bins = ["/usr/bin/xdg-open"]

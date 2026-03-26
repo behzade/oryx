@@ -17,6 +17,7 @@ use crate::metadata::{
     CoverArtClient, MetadataPolicy, MetadataResolver, MetadataTrackInput, MusicBrainzClient,
     ResolvedAlbumMetadata, ResolvedTrackMetadata,
 };
+use crate::pathing::sanitize_path_component;
 use crate::provider::{ProviderId, TrackRef, TrackSummary};
 
 const ARTWORK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
@@ -1608,32 +1609,6 @@ fn content_type_extension(content_type: &str) -> Option<&'static str> {
         "image/webp" => Some("webp"),
         "image/gif" => Some("gif"),
         _ => None,
-    }
-}
-
-fn sanitize_path_component(input: &str) -> String {
-    let mut sanitized = String::with_capacity(input.len());
-
-    for ch in input.chars() {
-        let replacement = match ch {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-            c if c.is_control() => '_',
-            c => c,
-        };
-        sanitized.push(replacement);
-    }
-
-    let sanitized = sanitized
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim_matches(['.', ' '])
-        .to_string();
-
-    if sanitized.is_empty() {
-        "Untitled".to_string()
-    } else {
-        sanitized
     }
 }
 

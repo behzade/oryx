@@ -18,6 +18,7 @@ use url::Url;
 
 use crate::audio::PlaybackSource;
 use crate::library::{CachedLibraryTrack, CachedTrack, Library, PreparedPlaybackTrack};
+use crate::pathing::sanitize_path_component;
 use crate::progressive::ProgressiveDownload;
 use crate::provider::{
     AudioFormat, CollectionKind, CollectionSummary, DownloadRequest, MusicProvider, ProviderId,
@@ -1222,32 +1223,6 @@ fn upsert_cached_track(
     super::entities::sync_cached_track(connection, track, track_position, artwork_path)?;
 
     Ok(())
-}
-
-fn sanitize_path_component(input: &str) -> String {
-    let mut sanitized = String::with_capacity(input.len());
-
-    for ch in input.chars() {
-        let replacement = match ch {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-            c if c.is_control() => '_',
-            c => c,
-        };
-        sanitized.push(replacement);
-    }
-
-    let sanitized = sanitized
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim_matches(['.', ' '])
-        .to_string();
-
-    if sanitized.is_empty() {
-        "Untitled".to_string()
-    } else {
-        sanitized
-    }
 }
 
 fn short_stable_suffix(value: &impl Hash) -> String {

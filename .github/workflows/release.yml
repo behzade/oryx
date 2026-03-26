@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "**"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS
+            os: macos-latest
+            formats: dmg
+            artifact_name: packages-macos
+            artifact_paths: target/release/*.dmg
+          - label: Linux
+            os: ubuntu-latest
+            formats: appimage,deb
+            artifact_name: packages-linux
+            artifact_paths: |
+              target/release/*.AppImage
+              target/release/*.deb
+          - label: Windows
+            os: windows-latest
+            formats: nsis
+            artifact_name: packages-windows
+            artifact_paths: target/release/*-setup.exe
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libdbus-1-dev \
+            libfontconfig1-dev \
+            libwayland-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb-composite0-dev \
+            libxcb-damage0-dev \
+            libxcb-render-util0-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxrandr-dev \
+            pkg-config
+
+      - name: Install Windows packaging dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version 0.11.8
+
+      - name: Build release packages
+        run: cargo packager --release --formats ${{ matrix.formats }}
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

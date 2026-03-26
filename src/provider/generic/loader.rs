@@ -75,9 +75,8 @@ pub(super) fn provider_directory() -> Result<PathBuf> {
         return Ok(PathBuf::from(directory));
     }
 
-    let root = dirs::home_dir()
-        .map(|home| home.join(".config"))
-        .or_else(dirs::config_dir)
+    let root = dirs::config_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
         .ok_or_else(|| anyhow!("failed to resolve Oryx config directory"))?;
 
     Ok(root.join("oryx").join("providers"))

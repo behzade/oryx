@@ -17,7 +17,7 @@ See [TRADEMARKS.md](./TRADEMARKS.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) fo
 
 ## Current Status
 
-- Primary packaging target: macOS
+- Release packaging is configured for macOS, Linux, and Windows
 - Local library import and playback are built in
 - Remote discovery/playback depends on provider manifests installed outside the repo
 
@@ -25,7 +25,9 @@ See [TRADEMARKS.md](./TRADEMARKS.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) fo
 
 Provider manifests are loaded from:
 
-- default: `~/.config/oryx/providers/<id>.toml`
+- Linux default: `~/.config/oryx/providers/<id>.toml`
+- macOS default: `~/Library/Application Support/oryx/providers/<id>.toml`
+- Windows default: `%AppData%\oryx\providers\<id>.toml`
 - override: `ORYX_PROVIDER_DIR`
 
 Oryx can also read optional bundled provider directories with lower precedence:
@@ -73,12 +75,18 @@ cargo test
 
 Oryx is not bound to `mpv` here. The external opener is intentionally generic, and a user-configurable opener can be added later.
 
-## Packaging
+## Packaging and Releases
 
-Build the macOS release package:
+Pushing a git tag triggers GitHub Actions to build and publish:
+
+- macOS `.dmg`
+- Linux `.AppImage` and `.deb`
+- Windows NSIS installer `.exe`
+
+Build a release package locally:
 
 ```bash
-cargo packager --release
+cargo packager --release --formats <dmg|appimage|deb|nsis>
 ```
 
 Artifacts are written under `target/release`.
