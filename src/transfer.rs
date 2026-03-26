@@ -1,5 +1,7 @@
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use std::thread;
@@ -10,6 +12,9 @@ use crate::library::{Library, PreparedPlaybackTrack};
 use crate::model::Track;
 use crate::progressive::ProgressiveDownload;
 use crate::provider::{SharedProvider, TrackSummary};
+use crate::url_media::{
+    download_video_to_path, fallback_title_for_url, next_download_destination, resolve_video_url,
+};
 
 #[derive(Clone)]
 pub struct TransferManager {
@@ -20,6 +25,7 @@ pub struct TransferManager {
 pub enum DownloadPurpose {
     Explicit,
     PlaybackPrefetch,
+    ExternalUrl,
 }
 
 #[derive(Clone)]
@@ -58,6 +64,33 @@ pub enum TransferEvent {
         track_id: String,
         title: String,
         purpose: DownloadPurpose,
+        error: String,
+    },
+    ExternalDownloadQueued {
+        download_id: String,
+        title: String,
+        source_url: String,
+    },
+    ExternalDownloadStarted {
+        download_id: String,
+        title: String,
+        source_url: String,
+        destination: PathBuf,
+        progress: ProgressiveDownload,
+    },
+    ExternalDownloadCompleted {
+        download_id: String,
+        title: String,
+        destination: PathBuf,
+    },
+    ExternalDownloadCancelled {
+        download_id: String,
+    },
+    ExternalDownloadFailed {
+        download_id: String,
+        title: String,
+        source_url: String,
+        destination: Option<PathBuf>,
         error: String,
     },
 }
@@ -172,6 +205,82 @@ impl TransferManager {
                 let _ = event_tx.send(event);
             })
             .expect("failed to spawn transfer download worker");
+    }
+
+    pub fn queue_external_url_download(&self, source_url: String) {
+        self.queue_external_url_download_with_id(next_external_download_id(), source_url);
+    }
+
+    pub fn queue_external_url_download_with_id(&self, download_id: String, source_url: String) {
+        let event_tx = self.event_tx.clone();
+        let queued_title = fallback_title_for_url(&source_url);
+        let _ = event_tx.send(TransferEvent::ExternalDownloadQueued {
+            download_id: download_id.clone(),
+            title: queued_title,
+            source_url: source_url.clone(),
+        });
+
+        thread::Builder::new()
+            .name("transfer-open-url-download".to_string())
+            .spawn(move || {
+                let mut resolved_title = fallback_title_for_url(&source_url);
+                let mut destination = None;
+                let progress = ProgressiveDownload::new();
+
+                let result = (|| -> anyhow::Result<()> {
+                    let resolved = resolve_video_url(&source_url)?;
+                    if let Some(title) = resolved.title.clone() {
+                        resolved_title = title;
+                    }
+                    let resolved_destination = next_download_destination(
+                        resolved.title.as_deref(),
+                        resolved.extension.as_deref(),
+                        &resolved.download_request.url,
+                    )?;
+                    destination = Some(resolved_destination.clone());
+                    let _ = event_tx.send(TransferEvent::ExternalDownloadStarted {
+                        download_id: download_id.clone(),
+                        title: resolved_title.clone(),
+                        source_url: source_url.clone(),
+                        destination: resolved_destination.clone(),
+                        progress: progress.clone(),
+                    });
+                    download_video_to_path(
+                        &resolved.download_request,
+                        &resolved_destination,
+                        Some(&progress),
+                    )?;
+                    Ok(())
+                })();
+
+                let event = match result {
+                    Ok(()) => TransferEvent::ExternalDownloadCompleted {
+                        download_id,
+                        title: resolved_title,
+                        destination: destination.expect("external download destination missing"),
+                    },
+                    Err(_error) if progress.is_cancelled() => {
+                        TransferEvent::ExternalDownloadCancelled { download_id }
+                    }
+                    Err(error) => {
+                        let error_message = format_anyhow_error(&error);
+                        eprintln!(
+                            "open url download failed for '{}': {error_message}",
+                            source_url
+                        );
+                        progress.fail(error_message.clone());
+                        TransferEvent::ExternalDownloadFailed {
+                            download_id,
+                            title: resolved_title,
+                            source_url,
+                            destination,
+                            error: error_message,
+                        }
+                    }
+                };
+                let _ = event_tx.send(event);
+            })
+            .expect("failed to spawn external download worker");
     }
 }
 
@@ -319,6 +428,11 @@ fn noop_raw_waker() -> RawWaker {
 
 static NOOP_WAKER_VTABLE: RawWakerVTable =
     RawWakerVTable::new(|_| noop_raw_waker(), |_| {}, |_| {}, |_| {});
+
+fn next_external_download_id() -> String {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    format!("external-url:{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
+}
 
 #[cfg(test)]
 mod tests {

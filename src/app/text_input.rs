@@ -16,6 +16,7 @@ use super::OryxApp;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum TextInputId {
     Query,
+    OpenUrl,
     ProviderAuthUsername,
     ProviderAuthPassword,
     ProviderLink,
@@ -595,6 +596,8 @@ impl OryxApp {
             Some(TextInputId::ProviderAuthPassword)
         } else if self.provider_auth_username_focus_handle.is_focused(window) {
             Some(TextInputId::ProviderAuthUsername)
+        } else if self.open_url_focus_handle.is_focused(window) {
+            Some(TextInputId::OpenUrl)
         } else if self.provider_link_focus_handle.is_focused(window) {
             Some(TextInputId::ProviderLink)
         } else if self.query_focus_handle.is_focused(window) {
@@ -613,6 +616,7 @@ impl OryxApp {
     pub(super) fn text_input(&self, input_id: &TextInputId) -> &TextInputState {
         match input_id {
             TextInputId::Query => &self.query_input,
+            TextInputId::OpenUrl => &self.open_url_input,
             TextInputId::ProviderAuthUsername => &self.provider_auth_username_input,
             TextInputId::ProviderAuthPassword => &self.provider_auth_password_input,
             TextInputId::ProviderLink => &self.provider_link_input,
@@ -626,6 +630,7 @@ impl OryxApp {
     pub(super) fn text_input_mut(&mut self, input_id: &TextInputId) -> &mut TextInputState {
         match input_id {
             TextInputId::Query => &mut self.query_input,
+            TextInputId::OpenUrl => &mut self.open_url_input,
             TextInputId::ProviderAuthUsername => &mut self.provider_auth_username_input,
             TextInputId::ProviderAuthPassword => &mut self.provider_auth_password_input,
             TextInputId::ProviderLink => &mut self.provider_link_input,
@@ -639,6 +644,7 @@ impl OryxApp {
     pub(super) fn text_input_focus_handle(&self, input_id: &TextInputId) -> &FocusHandle {
         match input_id {
             TextInputId::Query => &self.query_focus_handle,
+            TextInputId::OpenUrl => &self.open_url_focus_handle,
             TextInputId::ProviderAuthUsername => &self.provider_auth_username_focus_handle,
             TextInputId::ProviderAuthPassword => &self.provider_auth_password_focus_handle,
             TextInputId::ProviderLink => &self.provider_link_focus_handle,
@@ -716,6 +722,12 @@ impl OryxApp {
         if input_id == TextInputId::ProviderLink {
             self.update_ui_state(cx, |state| {
                 state.set_provider_link_error(None);
+            });
+        }
+
+        if input_id == TextInputId::OpenUrl {
+            self.update_ui_state(cx, |state| {
+                state.set_open_url_error(None);
             });
         }
 

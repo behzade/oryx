@@ -9,13 +9,14 @@ use objc2_app_kit::{NSApp, NSApplication, NSImage, NSWindowStyleMask};
 use objc2_foundation::{NSData, NSProcessInfo, NSSize, NSString};
 
 use crate::keybindings::{
-    ExportProviderLink, ImportFolder, ImportProviderLink, MinimizeWindow, PlayNextTrack,
+    ExportProviderLink, ImportFolder, ImportProviderLink, MinimizeWindow, OpenUrl, PlayNextTrack,
     PlayPreviousTrack, Quit, RefreshLocalArtwork, TogglePlayback,
 };
 
 use super::TextInputShortcut;
 
 pub(crate) const IMPORT_FOLDER_KEYBINDING: &str = "cmd-o";
+pub(crate) const OPEN_URL_KEYBINDING: &str = "cmd-shift-o";
 pub(crate) const QUIT_KEYBINDING: &str = "cmd-q";
 pub(crate) const MINIMIZE_KEYBINDING: &str = "cmd-m";
 pub(crate) const REFRESH_LOCAL_ARTWORK_KEYBINDING: &str = "cmd-shift-r";
@@ -232,6 +233,7 @@ fn setup_native_main_menu(cx: &mut App) {
         Menu {
             name: "File".into(),
             items: vec![
+                MenuItem::action("Open URL...", OpenUrl),
                 MenuItem::action("Import...", ImportFolder),
                 MenuItem::action("Import Provider Link...", ImportProviderLink),
                 MenuItem::action("Export Provider Link...", ExportProviderLink),

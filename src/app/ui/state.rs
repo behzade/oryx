@@ -31,6 +31,8 @@ pub(in crate::app) enum ProviderLinkPromptMode {
 
 pub(in crate::app) struct UiState {
     pub(in crate::app) downloads_modal_open: bool,
+    pub(in crate::app) open_url_prompt_open: bool,
+    pub(in crate::app) open_url_error: Option<String>,
     pub(in crate::app) provider_auth_prompt: Option<ProviderId>,
     pub(in crate::app) provider_auth_error: Option<String>,
     pub(in crate::app) provider_auth_submitting: bool,
@@ -46,6 +48,8 @@ impl UiState {
     pub(in crate::app) fn new() -> Self {
         Self {
             downloads_modal_open: false,
+            open_url_prompt_open: false,
+            open_url_error: None,
             provider_auth_prompt: None,
             provider_auth_error: None,
             provider_auth_submitting: false,
@@ -64,6 +68,14 @@ impl UiState {
 
     pub(in crate::app) fn downloads_modal_open(&self) -> bool {
         self.downloads_modal_open
+    }
+
+    pub(in crate::app) fn open_url_prompt_open(&self) -> bool {
+        self.open_url_prompt_open
+    }
+
+    pub(in crate::app) fn open_url_error(&self) -> Option<String> {
+        self.open_url_error.clone()
     }
 
     pub(in crate::app) fn provider_link_prompt(&self) -> Option<ProviderLinkPromptMode> {
@@ -100,6 +112,8 @@ impl UiState {
 
     pub(in crate::app) fn open_provider_auth_prompt(&mut self, provider_id: ProviderId) {
         self.downloads_modal_open = false;
+        self.open_url_prompt_open = false;
+        self.open_url_error = None;
         self.provider_auth_prompt = Some(provider_id);
         self.provider_auth_error = None;
         self.provider_auth_submitting = false;
@@ -113,6 +127,8 @@ impl UiState {
 
     pub(in crate::app) fn open_provider_link_prompt(&mut self, mode: ProviderLinkPromptMode) {
         self.downloads_modal_open = false;
+        self.open_url_prompt_open = false;
+        self.open_url_error = None;
         self.provider_auth_prompt = None;
         self.provider_auth_error = None;
         self.provider_auth_submitting = false;
@@ -144,6 +160,27 @@ impl UiState {
         self.provider_auth_error = error;
     }
 
+    pub(in crate::app) fn open_open_url_prompt(&mut self) {
+        self.downloads_modal_open = false;
+        self.provider_auth_prompt = None;
+        self.provider_auth_error = None;
+        self.provider_auth_submitting = false;
+        self.provider_link_prompt = None;
+        self.provider_link_error = None;
+        self.provider_link_submitting = false;
+        self.open_url_prompt_open = true;
+        self.open_url_error = None;
+    }
+
+    pub(in crate::app) fn reset_open_url_prompt(&mut self) {
+        self.open_url_prompt_open = false;
+        self.open_url_error = None;
+    }
+
+    pub(in crate::app) fn set_open_url_error(&mut self, error: Option<String>) {
+        self.open_url_error = error;
+    }
+
     pub(in crate::app) fn begin_provider_auth_submit(&mut self) {
         self.provider_auth_submitting = true;
         self.provider_auth_error = None;
@@ -155,6 +192,10 @@ impl UiState {
 
     pub(in crate::app) fn toggle_downloads_modal(&mut self) {
         self.downloads_modal_open = !self.downloads_modal_open;
+        if self.downloads_modal_open {
+            self.open_url_prompt_open = false;
+            self.open_url_error = None;
+        }
     }
 
     pub(in crate::app) fn close_downloads_modal(&mut self) -> bool {
@@ -177,6 +218,7 @@ impl UiState {
 
     pub(in crate::app) fn begin_import_review_analysis(&mut self) {
         self.close_downloads_modal();
+        self.reset_open_url_prompt();
         self.reset_provider_auth_prompt();
         self.import_review_loading = true;
     }

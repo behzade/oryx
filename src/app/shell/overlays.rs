@@ -15,6 +15,9 @@ impl OryxApp {
             .when(self.ui_state.read(cx).downloads_modal_open(), |shell| {
                 shell.child(self.render_downloads_modal(cx))
             })
+            .when(self.ui_state.read(cx).open_url_prompt_open(), |shell| {
+                shell.child(self.render_open_url_overlay(window, cx))
+            })
             .when(
                 self.ui_state.read(cx).provider_auth_prompt().is_some(),
                 |shell| shell.child(self.render_provider_auth_overlay(window, cx)),

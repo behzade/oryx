@@ -8,6 +8,7 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use super::TextInputShortcut;
 
 pub(crate) const IMPORT_FOLDER_KEYBINDING: &str = "ctrl-o";
+pub(crate) const OPEN_URL_KEYBINDING: &str = "ctrl-shift-o";
 pub(crate) const QUIT_KEYBINDING: &str = "ctrl-q";
 pub(crate) const MINIMIZE_KEYBINDING: &str = "ctrl-m";
 pub(crate) const REFRESH_LOCAL_ARTWORK_KEYBINDING: &str = "ctrl-shift-r";

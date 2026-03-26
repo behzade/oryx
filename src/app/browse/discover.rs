@@ -59,7 +59,7 @@ impl OryxApp {
     }
 
     fn render_topbar_actions(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let download_count = self.transfer_state.read(cx).active_downloads().len();
+        let download_count = self.transfer_state.read(cx).active_download_count();
         let label = if download_count == 0 {
             "Downloads".to_string()
         } else {

@@ -10,6 +10,7 @@ mod progressive;
 mod provider;
 mod theme;
 mod transfer;
+mod url_media;
 
 fn main() {
     if let Err(error) = app::run() {

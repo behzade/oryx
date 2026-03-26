@@ -6,6 +6,7 @@ actions!(
     oryx_actions,
     [
         Quit,
+        OpenUrl,
         ImportFolder,
         ImportProviderLink,
         ExportProviderLink,
@@ -27,6 +28,11 @@ pub fn bind(cx: &mut App) {
             Some(APP_KEY_CONTEXT),
         ),
         KeyBinding::new(platform::QUIT_KEYBINDING, Quit, Some(APP_KEY_CONTEXT)),
+        KeyBinding::new(
+            platform::OPEN_URL_KEYBINDING,
+            OpenUrl,
+            Some(APP_KEY_CONTEXT),
+        ),
         KeyBinding::new(
             platform::MINIMIZE_KEYBINDING,
             MinimizeWindow,

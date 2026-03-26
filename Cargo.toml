@@ -30,7 +30,7 @@ zstd = "0.13.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6.4", features = ["std"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSImage", "NSImageRep"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSImage", "NSImageRep", "NSWindow"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSGeometry", "NSProcessInfo", "NSString"] }
 
 [package.metadata.packager]

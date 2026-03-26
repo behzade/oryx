@@ -212,7 +212,31 @@ impl OryxApp {
                         format!("Download failed for '{}': {error}", title)
                     }
                     DownloadPurpose::PlaybackPrefetch => unreachable!(),
+                    DownloadPurpose::ExternalUrl => {
+                        format!("Download failed for '{}': {error}", title)
+                    }
                 };
+                self.status_message = Some(message.clone());
+                self.show_notification(message, NotificationLevel::Error, cx);
+            }
+            TransferEvent::ExternalDownloadQueued { title, .. } => {
+                self.status_message = Some(format!("Queued '{title}' for download."));
+                cx.notify();
+            }
+            TransferEvent::ExternalDownloadStarted { title, .. } => {
+                self.status_message = Some(format!("Downloading '{title}' to Downloads."));
+                cx.notify();
+            }
+            TransferEvent::ExternalDownloadCompleted {
+                title, destination, ..
+            } => {
+                let message = format!("Downloaded '{}' to {}.", title, destination.display());
+                self.status_message = Some(message.clone());
+                self.show_notification(message, NotificationLevel::Success, cx);
+            }
+            TransferEvent::ExternalDownloadCancelled { .. } => {}
+            TransferEvent::ExternalDownloadFailed { title, error, .. } => {
+                let message = format!("Open URL download failed for '{}': {error}", title);
                 self.status_message = Some(message.clone());
                 self.show_notification(message, NotificationLevel::Error, cx);
             }

@@ -22,6 +22,7 @@ use self::rows::{
 };
 use super::library::{AudioQuality, CollectionQualitySummary, normalized_audio_quality_grade};
 use super::text_input::{TextInputElement, TextInputId};
+use super::transfer_state::DownloadItemState;
 use super::ui::{self, ContextMenuState, ContextMenuTarget};
 use super::{
     AppIcon, BrowseMode, CollectionKindLabel, OryxApp, collection_entity_key, format_duration,
@@ -642,8 +643,8 @@ impl OryxApp {
     }
 
     pub(super) fn render_downloads_modal(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let mut downloads = self.transfer_state.read(cx).active_downloads();
-        downloads.sort_by(|left, right| left.title.cmp(&right.title));
+        let downloads = self.transfer_state.read(cx).download_items();
+        let active_download_count = downloads.iter().filter(|item| item.is_active()).count();
 
         let body = if downloads.is_empty() {
             div()
@@ -662,7 +663,7 @@ impl OryxApp {
                         .text_size(px(theme::META_SIZE))
                         .text_color(rgb(theme::TEXT_MUTED))
                         .child(
-                            "No active downloads. Future album downloads will show up here too."
+                            "No downloads yet. Track downloads and external URL downloads will show up here."
                                 .to_string(),
                         ),
                 )
@@ -683,16 +684,57 @@ impl OryxApp {
                         div()
                             .text_size(px(theme::META_SIZE))
                             .text_color(rgb(theme::TEXT_MUTED))
-                            .child(format!("{} active transfer(s)", downloads.len())),
+                            .child(if active_download_count == 0 {
+                                format!("{} saved item(s)", downloads.len())
+                            } else {
+                                format!(
+                                    "{} active transfer(s), {} total item(s)",
+                                    active_download_count,
+                                    downloads.len()
+                                )
+                            }),
                     ),
             );
 
             for download in downloads {
-                let snapshot = download.progress.snapshot();
-                let progress_ratio = download_progress_ratio(snapshot).unwrap_or(0.0);
+                let download_id = download.id.clone();
+                let download_title = download.title.clone();
+                let snapshot = match &download.state {
+                    DownloadItemState::Active { progress, .. } => Some(progress.snapshot()),
+                    _ => None,
+                };
+                let progress_ratio = snapshot.and_then(download_progress_ratio).unwrap_or(0.0);
                 let purpose = match download.purpose {
                     crate::transfer::DownloadPurpose::Explicit => "Download",
                     crate::transfer::DownloadPurpose::PlaybackPrefetch => "Playback cache",
+                    crate::transfer::DownloadPurpose::ExternalUrl => "External URL",
+                };
+                let secondary_line = match &download.state {
+                    DownloadItemState::Queued { source_url } => source_url.clone(),
+                    DownloadItemState::Active {
+                        source_url,
+                        destination,
+                        ..
+                    } => destination
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .or_else(|| source_url.clone())
+                        .unwrap_or_else(|| purpose.to_string()),
+                    DownloadItemState::Completed { destination, .. } => {
+                        destination.display().to_string()
+                    }
+                    DownloadItemState::Failed {
+                        destination, error, ..
+                    } => destination
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| error.clone()),
+                };
+                let status_label = match &download.state {
+                    DownloadItemState::Queued { .. } => "Resolving URL…".to_string(),
+                    DownloadItemState::Active { .. } => download_progress_label(snapshot),
+                    DownloadItemState::Completed { .. } => "Ready to open".to_string(),
+                    DownloadItemState::Failed { error, .. } => error.clone(),
                 };
                 column = column.child(
                     div()
@@ -702,46 +744,132 @@ impl OryxApp {
                         .border_color(rgb(theme::BORDER_SUBTLE))
                         .bg(rgb(theme::SURFACE_BASE))
                         .overflow_hidden()
-                        .child(
-                            div()
-                                .h(px(3.))
-                                .w(relative(progress_ratio.clamp(0.0, 1.0)))
-                                .bg(rgb(theme::DOWNLOAD_PROGRESS)),
-                        )
+                        .when(snapshot.is_some(), |card| {
+                            card.child(
+                                div()
+                                    .h(px(3.))
+                                    .w(relative(progress_ratio.clamp(0.0, 1.0)))
+                                    .bg(rgb(theme::DOWNLOAD_PROGRESS)),
+                            )
+                        })
                         .child(
                             div()
                                 .px(px(theme::SPACE_3))
                                 .py(px(theme::SPACE_3))
                                 .flex()
-                                .items_center()
-                                .justify_between()
+                                .flex_col()
                                 .gap(px(theme::SPACE_3))
                                 .child(
                                     div()
-                                        .flex_1()
-                                        .min_w_0()
                                         .flex()
-                                        .flex_col()
-                                        .gap(px(2.))
+                                        .items_center()
+                                        .justify_between()
+                                        .gap(px(theme::SPACE_3))
                                         .child(
                                             div()
-                                                .text_size(px(theme::BODY_SIZE))
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .overflow_hidden()
-                                                .child(download.title),
+                                                .flex_1()
+                                                .min_w_0()
+                                                .flex()
+                                                .flex_col()
+                                                .gap(px(2.))
+                                                .child(
+                                                    div()
+                                                        .text_size(px(theme::BODY_SIZE))
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .overflow_hidden()
+                                                        .child(download_title),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_size(px(theme::SMALL_SIZE))
+                                                        .text_color(rgb(theme::TEXT_DIM))
+                                                        .overflow_hidden()
+                                                        .child(secondary_line),
+                                                )
                                         )
                                         .child(
                                             div()
                                                 .text_size(px(theme::SMALL_SIZE))
-                                                .text_color(rgb(theme::TEXT_DIM))
-                                                .child(purpose.to_string()),
-                                        ),
+                                                .text_color(rgb(match &download.state {
+                                                    DownloadItemState::Failed { .. } => {
+                                                        theme::ACCENT_PRIMARY
+                                                    }
+                                                    _ => theme::DOWNLOAD_PROGRESS,
+                                                }))
+                                                .child(status_label)
+                                        )
                                 )
-                                .child(
-                                    div()
-                                        .text_size(px(theme::SMALL_SIZE))
-                                        .text_color(rgb(theme::DOWNLOAD_PROGRESS))
-                                        .child(download_progress_label(Some(snapshot))),
+                                .when(
+                                    matches!(
+                                        download.state,
+                                        DownloadItemState::Completed { .. }
+                                            | DownloadItemState::Failed { .. }
+                                    ),
+                                    |card| {
+                                        let actions = div().flex().justify_end().gap(px(theme::SPACE_2));
+                                        let actions = match &download.state {
+                                            DownloadItemState::Completed { destination, .. } => {
+                                                let destination = destination.clone();
+                                                actions.child(
+                                                    div()
+                                                        .px(px(theme::SPACE_3))
+                                                        .py(px(theme::SPACE_2))
+                                                        .rounded(px(10.))
+                                                        .cursor_pointer()
+                                                        .bg(rgb(theme::SURFACE_FLOATING))
+                                                        .text_size(px(theme::SMALL_SIZE))
+                                                        .text_color(rgb(theme::TEXT_MUTED))
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            cx.listener(
+                                                                move |this,
+                                                                      _event: &MouseDownEvent,
+                                                                      _window,
+                                                                      cx| {
+                                                                    this.open_external_download_in_mpv(
+                                                                        destination.clone(),
+                                                                        cx,
+                                                                    );
+                                                                },
+                                                            ),
+                                                        )
+                                                        .child("Open".to_string()),
+                                                )
+                                            }
+                                            DownloadItemState::Failed { source_url, .. } => {
+                                                let source_url = source_url.clone();
+                                                actions.child(
+                                                    div()
+                                                        .px(px(theme::SPACE_3))
+                                                        .py(px(theme::SPACE_2))
+                                                        .rounded(px(10.))
+                                                        .cursor_pointer()
+                                                        .border_1()
+                                                        .border_color(rgb(theme::BORDER_SUBTLE))
+                                                        .text_size(px(theme::SMALL_SIZE))
+                                                        .text_color(rgb(theme::TEXT_MUTED))
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            cx.listener(
+                                                                move |this,
+                                                                      _event: &MouseDownEvent,
+                                                                      _window,
+                                                                      cx| {
+                                                                    this.retry_external_download(
+                                                                        download_id.clone(),
+                                                                        source_url.clone(),
+                                                                        cx,
+                                                                    );
+                                                                },
+                                                            ),
+                                                        )
+                                                        .child("Retry".to_string()),
+                                                )
+                                            }
+                                            _ => actions,
+                                        };
+                                        card.child(actions)
+                                    },
                                 ),
                         ),
                 );

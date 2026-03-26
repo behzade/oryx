@@ -2,6 +2,7 @@ mod browse;
 mod controller;
 mod discover;
 mod library;
+mod open_url;
 mod playback;
 mod session_state;
 mod shell;
@@ -155,6 +156,32 @@ pub fn run() -> Result<()> {
     app.run(move |cx: &mut App| {
         platform::setup_app(cx);
         keybindings::bind(cx);
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
+        if let Some(shutdown_rx) = shutdown_rx.clone() {
+            let background = cx.background_executor().clone();
+            cx.spawn(move |cx: &mut AsyncApp| {
+                let background = background.clone();
+                let async_cx = cx.clone();
+                async move {
+                    let receiver = shutdown_rx.clone();
+                    let shutdown = background
+                        .spawn(async move { receiver.lock().ok()?.recv().ok() })
+                        .await;
+
+                    if shutdown.is_some() {
+                        let _ = async_cx.update(|app| {
+                            app.quit();
+                        });
+                    }
+                }
+            })
+            .detach();
+        }
         let startup_window = startup_window_dimensions(cx);
         let bounds = Bounds::centered(None, startup_window.size, cx);
 
@@ -169,10 +196,9 @@ pub fn run() -> Result<()> {
                     ..Default::default()
                 },
                 {
-                    let shutdown_rx = shutdown_rx.clone();
                     move |window, cx| {
                         let media_controls_hwnd = platform::media_controls_hwnd(window);
-                        cx.new(move |cx| OryxApp::new(media_controls_hwnd, shutdown_rx.clone(), cx))
+                        cx.new(move |cx| OryxApp::new(media_controls_hwnd, None, cx))
                     }
                 },
             )
@@ -192,6 +218,7 @@ pub fn run() -> Result<()> {
 struct OryxApp {
     shell_focus_handle: gpui::FocusHandle,
     query_focus_handle: gpui::FocusHandle,
+    open_url_focus_handle: gpui::FocusHandle,
     provider_auth_username_focus_handle: gpui::FocusHandle,
     provider_auth_password_focus_handle: gpui::FocusHandle,
     provider_link_focus_handle: gpui::FocusHandle,
@@ -206,6 +233,7 @@ struct OryxApp {
     ui_state: Entity<UiState>,
     transfer: TransferManager,
     query_input: TextInputState,
+    open_url_input: TextInputState,
     provider_auth_username_input: TextInputState,
     provider_auth_password_input: TextInputState,
     provider_link_input: TextInputState,
@@ -296,6 +324,7 @@ impl OryxApp {
         let app = Self {
             shell_focus_handle: cx.focus_handle().tab_stop(true),
             query_focus_handle: cx.focus_handle().tab_stop(true),
+            open_url_focus_handle: cx.focus_handle().tab_stop(true),
             provider_auth_username_focus_handle: cx.focus_handle().tab_stop(true),
             provider_auth_password_focus_handle: cx.focus_handle().tab_stop(true),
             provider_link_focus_handle: cx.focus_handle().tab_stop(true),
@@ -303,6 +332,7 @@ impl OryxApp {
             providers,
             library,
             query_input: TextInputState::new(restored.query, restored.query_cursor),
+            open_url_input: TextInputState::new(String::new(), 0),
             provider_auth_username_input: TextInputState::new(String::new(), 0),
             provider_auth_password_input: TextInputState::new(String::new(), 0),
             provider_link_input: TextInputState::new(String::new(), 0),
@@ -405,6 +435,7 @@ impl OryxApp {
     fn toggle_source_picker(&mut self, cx: &mut Context<Self>) {
         if self.ui_state.read(cx).provider_auth_prompt().is_some()
             || self.ui_state.read(cx).provider_link_prompt().is_some()
+            || self.ui_state.read(cx).open_url_prompt_open()
         {
             return;
         }
@@ -417,6 +448,7 @@ impl OryxApp {
     fn toggle_downloads_modal(&mut self, cx: &mut Context<Self>) {
         if self.ui_state.read(cx).provider_auth_prompt().is_some()
             || self.ui_state.read(cx).provider_link_prompt().is_some()
+            || self.ui_state.read(cx).open_url_prompt_open()
         {
             return;
         }

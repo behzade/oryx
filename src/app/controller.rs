@@ -22,6 +22,10 @@ impl OryxApp {
         cx: &mut Context<Self>,
     ) {
         let focused_input = self.focused_text_input(window);
+        if self.ui_state.read(cx).open_url_prompt_open() {
+            self.handle_open_url_key_down(event, focused_input, window, cx);
+            return;
+        }
         if self.ui_state.read(cx).provider_link_prompt().is_some() {
             self.handle_provider_link_key_down(event, focused_input, cx);
             return;
@@ -110,6 +114,37 @@ impl OryxApp {
         match event.keystroke.key.as_str() {
             "escape" => self.close_provider_link_prompt(cx),
             "enter" => self.submit_provider_link_prompt(cx),
+            _ => {}
+        }
+    }
+
+    fn handle_open_url_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        focused_input: Option<TextInputId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let modifiers = event.keystroke.modifiers;
+        if focused_input == Some(TextInputId::OpenUrl)
+            && let Some(shortcut) =
+                platform::map_text_input_shortcut(event.keystroke.key.as_str(), modifiers)
+        {
+            self.dispatch_text_input_command(TextInputId::OpenUrl, shortcut, cx);
+            return;
+        }
+
+        if modifiers.function {
+            return;
+        }
+
+        match event.keystroke.key.as_str() {
+            "escape" => self.close_open_url_prompt(cx),
+            "tab" => {
+                self.focus_text_input(&TextInputId::OpenUrl, window);
+                cx.notify();
+            }
+            "enter" => self.submit_open_url_prompt(cx),
             _ => {}
         }
     }

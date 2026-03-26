@@ -1,7 +1,7 @@
 use gpui::{Context, Div, InteractiveElement};
 
 use crate::keybindings::{
-    ExportProviderLink, ImportFolder, ImportProviderLink, MinimizeWindow, PlayNextTrack,
+    ExportProviderLink, ImportFolder, ImportProviderLink, MinimizeWindow, OpenUrl, PlayNextTrack,
     PlayPreviousTrack, Quit, RefreshLocalArtwork, TogglePlayback,
 };
 use crate::platform;
@@ -30,6 +30,9 @@ impl OryxApp {
             }))
             .on_action(cx.listener(|this, _action: &ImportFolder, window, cx| {
                 this.prompt_for_import_folder(window, cx);
+            }))
+            .on_action(cx.listener(|this, _action: &OpenUrl, window, cx| {
+                this.open_url_prompt(window, cx);
             }))
             .on_action(
                 cx.listener(|this, _action: &ImportProviderLink, window, cx| {
