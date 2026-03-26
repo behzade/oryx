@@ -321,7 +321,7 @@ impl OryxApp {
             },
         );
 
-        let app = Self {
+        let mut app = Self {
             shell_focus_handle: cx.focus_handle().tab_stop(true),
             query_focus_handle: cx.focus_handle().tab_stop(true),
             open_url_focus_handle: cx.focus_handle().tab_stop(true),
@@ -356,6 +356,7 @@ impl OryxApp {
 
         Self::spawn_media_control_listener(media_event_rx, playback_state, cx);
         Self::spawn_transfer_listener(transfer_rx, transfer_state, cx);
+        app.restore_external_downloads(restored.external_downloads, cx);
         Self::spawn_playback_refresh(cx);
         Self::spawn_startup_audio_prewarm(playback, cx);
         if let Some(shutdown_rx) = shutdown_rx {
@@ -726,6 +727,7 @@ impl OryxApp {
 pub(super) enum AppIcon {
     Search,
     Play,
+    PlayCircle,
     Pause,
     SkipBack,
     SkipForward,
@@ -745,6 +747,7 @@ impl AppIcon {
         match self {
             Self::Search => "icons/lucide/search.svg",
             Self::Play => "icons/lucide/play.svg",
+            Self::PlayCircle => "icons/lucide/play-circle.svg",
             Self::Pause => "icons/lucide/pause.svg",
             Self::SkipBack => "icons/lucide/skip-back.svg",
             Self::SkipForward => "icons/lucide/skip-forward.svg",

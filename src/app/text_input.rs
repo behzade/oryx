@@ -2,10 +2,10 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 use gpui::{
-    App, Bounds, Context, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, GlobalElementId, IntoElement, LayoutId, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine, Style, TextRun, UTF16Selection,
-    UnderlineStyle, Window, fill, point, px, relative, rgb, rgba, size,
+    App, Bounds, ContentMask, Context, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, FocusHandle, GlobalElementId, IntoElement, LayoutId, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine, Style, TextRun,
+    UTF16Selection, UnderlineStyle, Window, fill, point, px, relative, rgb, rgba, size,
 };
 
 use crate::library::ImportMetadataField;
@@ -588,6 +588,7 @@ pub(super) struct TextInputPrepaintState {
     line: Option<ShapedLine>,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
+    layout_bounds: Option<Bounds<Pixels>>,
 }
 
 impl OryxApp {
@@ -951,6 +952,7 @@ impl Element for TextInputElement {
         let line = window
             .text_system()
             .shape_line(display_text.into(), font_size, &runs, None);
+        let layout_bounds = scrolled_text_bounds(&line, bounds, cursor);
 
         let selection = if selected_range.is_empty() || content.is_empty() {
             None
@@ -958,12 +960,12 @@ impl Element for TextInputElement {
             Some(fill(
                 Bounds::from_corners(
                     point(
-                        bounds.left() + line.x_for_index(selected_range.start),
-                        bounds.top(),
+                        layout_bounds.left() + line.x_for_index(selected_range.start),
+                        layout_bounds.top(),
                     ),
                     point(
-                        bounds.left() + line.x_for_index(selected_range.end),
-                        bounds.bottom(),
+                        layout_bounds.left() + line.x_for_index(selected_range.end),
+                        layout_bounds.bottom(),
                     ),
                 ),
                 rgba(0x55EA9738),
@@ -972,8 +974,11 @@ impl Element for TextInputElement {
 
         let cursor = Some(fill(
             Bounds::new(
-                point(bounds.left() + line.x_for_index(cursor), bounds.top()),
-                size(px(2.), bounds.bottom() - bounds.top()),
+                point(
+                    layout_bounds.left() + line.x_for_index(cursor),
+                    layout_bounds.top(),
+                ),
+                size(px(2.), layout_bounds.bottom() - layout_bounds.top()),
             ),
             rgb(theme::ACCENT_PRIMARY),
         ));
@@ -982,6 +987,7 @@ impl Element for TextInputElement {
             line: Some(line),
             cursor,
             selection,
+            layout_bounds: Some(layout_bounds),
         }
     }
 
@@ -1007,21 +1013,48 @@ impl Element for TextInputElement {
         );
 
         if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection);
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                window.paint_quad(selection);
+            });
         }
 
         let line = prepaint.line.take().unwrap();
-        let _ = line.paint(bounds.origin, window.line_height(), window, cx);
-
-        if focus_handle.is_focused(window)
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
+        let layout_bounds = prepaint.layout_bounds.take().unwrap_or(bounds);
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            let _ = line.paint(layout_bounds.origin, window.line_height(), window, cx);
+            if focus_handle.is_focused(window)
+                && let Some(cursor) = prepaint.cursor.take()
+            {
+                window.paint_quad(cursor);
+            }
+        });
 
         let input_id = self.input_id.clone();
         self.app.clone().update(cx, |app, _cx| {
-            app.text_input_mut(&input_id).set_layout(line, bounds);
+            app.text_input_mut(&input_id)
+                .set_layout(line, layout_bounds);
         });
     }
+}
+
+fn scrolled_text_bounds(
+    line: &ShapedLine,
+    bounds: Bounds<Pixels>,
+    cursor_index: usize,
+) -> Bounds<Pixels> {
+    let visible_width = bounds.size.width;
+    let line_width = line.width;
+    if line_width <= visible_width {
+        return bounds;
+    }
+
+    let half_window = visible_width.to_f64() as f32 / 2.0;
+    let max_scroll = (line_width - visible_width).to_f64() as f32;
+    let cursor_x = line.x_for_index(cursor_index).to_f64() as f32;
+    let scroll_x = (cursor_x - half_window).clamp(0.0, max_scroll);
+
+    Bounds::new(
+        point(bounds.left() - px(scroll_x), bounds.top()),
+        bounds.size,
+    )
 }

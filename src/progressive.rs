@@ -21,6 +21,7 @@ struct ProgressiveDownloadState {
     total_len: Option<u64>,
     complete: bool,
     cancelled: bool,
+    paused: bool,
     retrying: bool,
     failure: Option<String>,
 }
@@ -43,6 +44,8 @@ pub struct ProgressiveSnapshot {
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
     pub complete: bool,
+    pub paused: bool,
+    pub retrying: bool,
 }
 
 impl ProgressiveDownload {
@@ -91,6 +94,7 @@ impl ProgressiveDownload {
         if state.cancelled {
             return;
         }
+        state.paused = false;
         state.retrying = false;
         if available_len > state.available_len {
             state.available_len = available_len;
@@ -102,6 +106,7 @@ impl ProgressiveDownload {
     pub fn cancel(&self) {
         let mut state = self.inner.state.lock().expect("progressive state poisoned");
         state.cancelled = true;
+        state.paused = false;
         state.retrying = false;
         self.inner.wake.notify_all();
     }
@@ -111,14 +116,37 @@ impl ProgressiveDownload {
         if state.cancelled {
             return;
         }
+        state.paused = false;
         state.retrying = false;
         state.failure = Some(message.into());
+        self.inner.wake.notify_all();
+    }
+
+    pub fn pause(&self) {
+        let mut state = self.inner.state.lock().expect("progressive state poisoned");
+        if state.cancelled || state.complete || state.failure.is_some() {
+            return;
+        }
+        state.paused = true;
+        self.inner.wake.notify_all();
+    }
+
+    pub fn resume(&self) {
+        let mut state = self.inner.state.lock().expect("progressive state poisoned");
+        if state.cancelled || state.complete || state.failure.is_some() {
+            return;
+        }
+        state.paused = false;
+        state.retrying = false;
         self.inner.wake.notify_all();
     }
 
     pub fn set_retrying(&self, retrying: bool) {
         let mut state = self.inner.state.lock().expect("progressive state poisoned");
         if state.cancelled || state.complete || state.failure.is_some() {
+            return;
+        }
+        if state.paused {
             return;
         }
         state.retrying = retrying;
@@ -128,6 +156,11 @@ impl ProgressiveDownload {
     pub fn is_cancelled(&self) -> bool {
         let state = self.inner.state.lock().expect("progressive state poisoned");
         state.cancelled
+    }
+
+    pub fn is_paused(&self) -> bool {
+        let state = self.inner.state.lock().expect("progressive state poisoned");
+        state.paused
     }
 
     pub fn failure_message(&self) -> Option<String> {
@@ -198,7 +231,38 @@ impl ProgressiveDownload {
             downloaded_bytes: state.available_len,
             total_bytes: state.total_len,
             complete: state.complete,
+            paused: state.paused,
+            retrying: state.retrying,
         }
+    }
+
+    pub fn wait_if_paused(&self) -> Result<(), ProgressiveDownloadError> {
+        let mut state = self.inner.state.lock().expect("progressive state poisoned");
+        while state.paused {
+            if state.cancelled {
+                return Err(ProgressiveDownloadError::cancelled());
+            }
+            if let Some(message) = state.failure.clone() {
+                return Err(ProgressiveDownloadError::new(message));
+            }
+            if state.complete {
+                return Ok(());
+            }
+            state = self
+                .inner
+                .wake
+                .wait(state)
+                .expect("progressive state poisoned");
+        }
+
+        if state.cancelled {
+            return Err(ProgressiveDownloadError::cancelled());
+        }
+        if let Some(message) = state.failure.clone() {
+            return Err(ProgressiveDownloadError::new(message));
+        }
+
+        Ok(())
     }
 
     fn availability(&self) -> io::Result<Availability> {
@@ -225,6 +289,14 @@ impl ProgressiveDownload {
             }
             if let Some(message) = state.failure.clone() {
                 return Err(io::Error::other(message));
+            }
+            if state.paused {
+                state = self
+                    .inner
+                    .wake
+                    .wait(state)
+                    .expect("progressive state poisoned");
+                continue;
             }
             state = self
                 .inner
@@ -384,5 +456,18 @@ mod tests {
         assert_eq!(position, 8);
 
         fs::remove_file(&path).expect("temp file should be removable");
+    }
+
+    #[test]
+    fn pause_and_resume_are_reflected_in_snapshot() {
+        let download = ProgressiveDownload::new();
+
+        download.pause();
+        assert!(download.is_paused());
+        assert!(download.snapshot().paused);
+
+        download.resume();
+        assert!(!download.is_paused());
+        assert!(!download.snapshot().paused);
     }
 }

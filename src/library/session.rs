@@ -45,12 +45,38 @@ pub struct SessionSnapshot {
     pub selected_local_artist_id: Option<String>,
     #[serde(default)]
     pub selected_local_playlist_id: Option<String>,
+    #[serde(default)]
+    pub external_downloads: Vec<PersistedExternalDownload>,
 }
 
 impl SessionSnapshot {
     pub fn playback_position(&self) -> Duration {
         Duration::from_secs(self.playback_position_seconds)
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedExternalDownload {
+    pub id: String,
+    pub title: String,
+    pub source_url: String,
+    #[serde(default)]
+    pub destination: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub paused: bool,
+    pub state: PersistedExternalDownloadState,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum PersistedExternalDownloadState {
+    Pending,
+    Completed {
+        destination: std::path::PathBuf,
+    },
+    Failed {
+        destination: Option<std::path::PathBuf>,
+        error: String,
+    },
 }
 
 pub(super) fn save_session_snapshot(library: &Library, snapshot: &SessionSnapshot) -> Result<()> {

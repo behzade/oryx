@@ -70,17 +70,20 @@ pub enum TransferEvent {
         download_id: String,
         title: String,
         source_url: String,
+        progress: ProgressiveDownload,
     },
     ExternalDownloadStarted {
         download_id: String,
         title: String,
         source_url: String,
         destination: PathBuf,
+        duration_seconds: Option<u64>,
         progress: ProgressiveDownload,
     },
     ExternalDownloadCompleted {
         download_id: String,
         title: String,
+        source_url: String,
         destination: PathBuf,
     },
     ExternalDownloadCancelled {
@@ -208,16 +211,32 @@ impl TransferManager {
     }
 
     pub fn queue_external_url_download(&self, source_url: String) {
-        self.queue_external_url_download_with_id(next_external_download_id(), source_url);
+        self.queue_external_url_download_with_id(
+            next_external_download_id(),
+            source_url,
+            None,
+            false,
+        );
     }
 
-    pub fn queue_external_url_download_with_id(&self, download_id: String, source_url: String) {
+    pub fn queue_external_url_download_with_id(
+        &self,
+        download_id: String,
+        source_url: String,
+        preferred_destination: Option<PathBuf>,
+        start_paused: bool,
+    ) {
         let event_tx = self.event_tx.clone();
         let queued_title = fallback_title_for_url(&source_url);
+        let progress = ProgressiveDownload::new();
+        if start_paused {
+            progress.pause();
+        }
         let _ = event_tx.send(TransferEvent::ExternalDownloadQueued {
             download_id: download_id.clone(),
             title: queued_title,
             source_url: source_url.clone(),
+            progress: progress.clone(),
         });
 
         thread::Builder::new()
@@ -225,9 +244,9 @@ impl TransferManager {
             .spawn(move || {
                 let mut resolved_title = fallback_title_for_url(&source_url);
                 let mut destination = None;
-                let progress = ProgressiveDownload::new();
 
                 let result = (|| -> anyhow::Result<()> {
+                    progress.wait_if_paused()?;
                     let resolved = resolve_video_url(&source_url)?;
                     if let Some(title) = resolved.title.clone() {
                         resolved_title = title;
@@ -236,6 +255,7 @@ impl TransferManager {
                         resolved.title.as_deref(),
                         resolved.extension.as_deref(),
                         &resolved.download_request.url,
+                        preferred_destination.as_deref(),
                     )?;
                     destination = Some(resolved_destination.clone());
                     let _ = event_tx.send(TransferEvent::ExternalDownloadStarted {
@@ -243,6 +263,7 @@ impl TransferManager {
                         title: resolved_title.clone(),
                         source_url: source_url.clone(),
                         destination: resolved_destination.clone(),
+                        duration_seconds: resolved.duration_seconds,
                         progress: progress.clone(),
                     });
                     download_video_to_path(
@@ -257,6 +278,7 @@ impl TransferManager {
                     Ok(()) => TransferEvent::ExternalDownloadCompleted {
                         download_id,
                         title: resolved_title,
+                        source_url,
                         destination: destination.expect("external download destination missing"),
                     },
                     Err(_error) if progress.is_cancelled() => {

@@ -178,6 +178,14 @@ impl OryxApp {
         event: TransferEvent,
         cx: &mut Context<Self>,
     ) {
+        let should_persist_external_downloads = matches!(
+            &event,
+            TransferEvent::ExternalDownloadQueued { .. }
+                | TransferEvent::ExternalDownloadStarted { .. }
+                | TransferEvent::ExternalDownloadCompleted { .. }
+                | TransferEvent::ExternalDownloadCancelled { .. }
+                | TransferEvent::ExternalDownloadFailed { .. }
+        );
         match event {
             TransferEvent::DownloadStarted { .. } => {}
             TransferEvent::DownloadCompleted { title, purpose, .. } => {
@@ -340,6 +348,9 @@ impl OryxApp {
                     state.mark_playback_failed();
                 });
             }
+        }
+        if should_persist_external_downloads {
+            self.persist_session_snapshot(cx);
         }
         cx.notify();
     }

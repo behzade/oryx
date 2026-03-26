@@ -20,10 +20,24 @@ const DOWNLOAD_RETRY_BASE_DELAY_MS: u64 = 750;
 pub(crate) struct ResolvedVideoRequest {
     pub(crate) title: Option<String>,
     pub(crate) extension: Option<String>,
+    pub(crate) duration_seconds: Option<u64>,
     pub(crate) download_request: DownloadRequest,
 }
 
+pub(crate) fn validate_open_url_input(url: &str) -> Result<Url> {
+    let parsed = Url::parse(url).context("Enter a valid URL.")?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => anyhow::bail!("Only http:// and https:// URLs are supported."),
+    }
+    if parsed.host_str().is_none() {
+        anyhow::bail!("Enter a complete URL with a host.");
+    }
+    Ok(parsed)
+}
+
 pub(crate) fn resolve_video_url(url: &str) -> Result<ResolvedVideoRequest> {
+    let _ = validate_open_url_input(url)?;
     let output = Command::new(preferred_binary("yt-dlp", &["/opt/homebrew/bin/yt-dlp"]))
         .arg("--dump-single-json")
         .arg("--no-warnings")
@@ -36,14 +50,10 @@ pub(crate) fn resolve_video_url(url: &str) -> Result<ResolvedVideoRequest> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        anyhow::bail!(
-            "yt-dlp failed{}",
-            if stderr.is_empty() {
-                String::new()
-            } else {
-                format!(": {stderr}")
-            }
-        );
+        if !stderr.is_empty() {
+            eprintln!("yt-dlp failed for '{url}': {stderr}");
+        }
+        anyhow::bail!("Could not resolve a playable media source from that URL.");
     }
 
     let dump: YtDlpDump =
@@ -55,7 +65,8 @@ pub(crate) fn resolve_video_url(url: &str) -> Result<ResolvedVideoRequest> {
         .url
         .clone()
         .context("yt-dlp did not return a downloadable media URL")?;
-    let extension = selected.ext.or(dump.ext);
+    let duration_seconds = dump.duration_seconds();
+    let extension = selected.ext.or(dump.ext.clone());
     let supports_byte_ranges = !is_hls_playlist_url(&playback_url);
     let headers = selected
         .http_headers
@@ -67,6 +78,7 @@ pub(crate) fn resolve_video_url(url: &str) -> Result<ResolvedVideoRequest> {
     Ok(ResolvedVideoRequest {
         title: dump.title,
         extension: extension.clone(),
+        duration_seconds,
         download_request: DownloadRequest {
             url: playback_url,
             headers,
@@ -83,6 +95,7 @@ pub(crate) fn next_download_destination(
     title: Option<&str>,
     extension: Option<&str>,
     source_url: &str,
+    preferred_destination: Option<&Path>,
 ) -> Result<PathBuf> {
     let downloads_dir = dirs::download_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
@@ -99,6 +112,7 @@ pub(crate) fn next_download_destination(
         title,
         extension,
         source_url,
+        preferred_destination,
     ))
 }
 
@@ -174,6 +188,8 @@ struct YtDlpDump {
     #[serde(default)]
     ext: Option<String>,
     #[serde(default)]
+    duration: Option<f64>,
+    #[serde(default)]
     url: Option<String>,
     #[serde(default)]
     http_headers: Option<HashMap<String, String>>,
@@ -192,6 +208,12 @@ struct YtDlpRequestedDownload {
 }
 
 impl YtDlpDump {
+    fn duration_seconds(&self) -> Option<u64> {
+        self.duration
+            .filter(|seconds| *seconds > 0.0)
+            .map(|seconds| seconds.ceil() as u64)
+    }
+
     fn selected_download(&self) -> Option<YtDlpRequestedDownload> {
         self.requested_downloads
             .iter()
@@ -217,16 +239,33 @@ fn build_download_destination(
     title: Option<&str>,
     extension: Option<&str>,
     source_url: &str,
+    preferred_destination: Option<&Path>,
 ) -> PathBuf {
+    if let Some(preferred_destination) = preferred_destination {
+        return preferred_destination.to_path_buf();
+    }
+
     let base_name = title
         .filter(|title| !title.trim().is_empty())
         .map(sanitize_path_component)
         .unwrap_or_else(|| fallback_download_name(source_url));
     let extension = sanitize_extension(extension.or_else(|| extension_from_url(source_url)));
-    downloads_dir.join(format!("{base_name}.{extension}"))
+    let initial_destination = downloads_dir.join(format!("{base_name}.{extension}"));
+    if !initial_destination.exists() {
+        return initial_destination;
+    }
+
+    let mut duplicate_index = 2usize;
+    loop {
+        let candidate = downloads_dir.join(format!("{base_name} {duplicate_index}.{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        duplicate_index += 1;
+    }
 }
 
-fn fallback_download_name(source_url: &str) -> String {
+pub(crate) fn fallback_download_name(source_url: &str) -> String {
     Url::parse(source_url)
         .ok()
         .and_then(|url| {
@@ -321,6 +360,9 @@ fn download_to_partial_path(
     let mut attempt = 0usize;
 
     loop {
+        if let Some(progress) = progress {
+            progress.wait_if_paused()?;
+        }
         if progress.is_some_and(ProgressiveDownload::is_cancelled) {
             anyhow::bail!("Download cancelled.");
         }
@@ -357,6 +399,7 @@ fn download_attempt(
     existing_len: u64,
 ) -> Result<DownloadResult> {
     if let Some(progress) = progress {
+        progress.wait_if_paused()?;
         progress.set_retrying(false);
     }
     let (response, resume_from) = match open_download_response(request, existing_len)? {
@@ -389,6 +432,9 @@ fn download_attempt(
     let mut total_bytes = resume_from;
 
     loop {
+        if let Some(progress) = progress {
+            progress.wait_if_paused()?;
+        }
         if progress.is_some_and(ProgressiveDownload::is_cancelled) {
             anyhow::bail!("Download cancelled.");
         }
@@ -448,6 +494,9 @@ fn download_hls_stream_to_partial_path(
     let mut total_bytes = 0u64;
 
     for segment_url in segment_urls {
+        if let Some(progress) = progress {
+            progress.wait_if_paused()?;
+        }
         if progress.is_some_and(ProgressiveDownload::is_cancelled) {
             anyhow::bail!("Download cancelled.");
         }
@@ -738,9 +787,15 @@ mod tests {
     }
 
     #[test]
-    fn build_download_destination_reuses_existing_base_name() {
-        let downloads_dir =
-            std::env::temp_dir().join(format!("oryx-open-url-test-{}", std::process::id()));
+    fn build_download_destination_numbers_colliding_base_name() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let downloads_dir = std::env::temp_dir().join(format!(
+            "oryx-open-url-test-{}-{unique}",
+            std::process::id()
+        ));
         let _ = fs::create_dir_all(&downloads_dir);
         let existing = downloads_dir.join("Example Video.mp4");
         let _ = fs::write(&existing, b"partial");
@@ -750,6 +805,35 @@ mod tests {
             Some("Example Video"),
             Some("mp4"),
             "https://example.com/video",
+            None,
+        );
+
+        assert_eq!(destination, downloads_dir.join("Example Video 2.mp4"));
+
+        let _ = fs::remove_file(&existing);
+        let _ = fs::remove_dir(&downloads_dir);
+    }
+
+    #[test]
+    fn build_download_destination_honors_preferred_destination_for_resume() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let downloads_dir = std::env::temp_dir().join(format!(
+            "oryx-open-url-test-{}-{unique}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&downloads_dir);
+        let existing = downloads_dir.join("Example Video.mp4");
+        let _ = fs::write(&existing, b"partial");
+
+        let destination = build_download_destination(
+            &downloads_dir,
+            Some("Example Video"),
+            Some("mp4"),
+            "https://example.com/video",
+            Some(&existing),
         );
 
         assert_eq!(destination, existing);

@@ -27,7 +27,7 @@ pub use import::{
 pub(crate) const LIKED_PLAYLIST_ID: &str = entities::LIKED_PLAYLIST_ID;
 pub use provider_state::ProviderRuntimeState;
 pub(crate) const RECENTLY_PLAYED_PLAYLIST_ID: &str = session::RECENTLY_PLAYED_PLAYLIST_ID;
-pub use session::SessionSnapshot;
+pub use session::{PersistedExternalDownload, PersistedExternalDownloadState, SessionSnapshot};
 
 #[derive(Clone, Debug)]
 pub struct Library {

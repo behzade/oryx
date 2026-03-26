@@ -6,14 +6,44 @@ use gpui::{
     Window, div, px, rgb,
 };
 
+use crate::library::{PersistedExternalDownload, PersistedExternalDownloadState};
 use crate::theme;
-use crate::url_media::launch_mpv;
+use crate::url_media::{launch_mpv, validate_open_url_input};
 
 use super::OryxApp;
 use super::text_input::{TextInputElement, TextInputId};
+use super::transfer_state::DownloadItemState;
 use super::ui::{self, NotificationLevel};
 
 impl OryxApp {
+    pub(super) fn restore_external_downloads(
+        &mut self,
+        downloads: Vec<PersistedExternalDownload>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut retained = Vec::new();
+        let mut pending = Vec::new();
+        for download in downloads {
+            match download.state {
+                PersistedExternalDownloadState::Pending => pending.push(download),
+                PersistedExternalDownloadState::Completed { .. }
+                | PersistedExternalDownloadState::Failed { .. } => retained.push(download),
+            }
+        }
+
+        self.transfer_state.update(cx, |state, _cx| {
+            state.restore_persisted_external_downloads(retained);
+        });
+        for download in pending {
+            self.transfer.queue_external_url_download_with_id(
+                download.id,
+                download.source_url,
+                download.destination,
+                download.paused,
+            );
+        }
+    }
+
     pub(super) fn open_url_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.discover.update(cx, |discover, _cx| {
             discover.close_source_picker();
@@ -52,11 +82,91 @@ impl OryxApp {
             cx.notify();
             return;
         }
+        let normalized_url = match validate_open_url_input(&url) {
+            Ok(parsed) => parsed.to_string(),
+            Err(error) => {
+                self.update_ui_state(cx, |state| {
+                    state.set_open_url_error(Some(format!("{error:#}")));
+                });
+                cx.notify();
+                return;
+            }
+        };
 
-        self.transfer.queue_external_url_download(url.clone());
+        let existing = self
+            .transfer_state
+            .read(cx)
+            .external_download_for_url(&normalized_url);
+        if let Some(existing) = existing {
+            self.open_url_input.reset(String::new());
+            self.update_ui_state(cx, |state| {
+                state.reset_open_url_prompt();
+                state.open_downloads_modal();
+            });
+            match existing.state {
+                DownloadItemState::Queued { .. } | DownloadItemState::Active { .. } => {
+                    self.status_message =
+                        Some(format!("'{}' is already downloading.", existing.title));
+                    cx.notify();
+                    return;
+                }
+                DownloadItemState::Completed { .. } => {
+                    self.status_message =
+                        Some(format!("'{}' is already in Downloads.", existing.title));
+                    cx.notify();
+                    return;
+                }
+                DownloadItemState::Failed { destination, .. } => {
+                    self.retry_external_download(existing.id, normalized_url, destination, cx);
+                    return;
+                }
+            }
+        }
+
+        self.transfer
+            .queue_external_url_download(normalized_url.clone());
         self.open_url_input.reset(String::new());
         self.update_ui_state(cx, |state| state.reset_open_url_prompt());
-        self.status_message = Some(format!("Queued '{url}' for download."));
+        self.status_message = Some(format!("Queued '{}' for download.", normalized_url));
+        cx.notify();
+    }
+
+    pub(super) fn cancel_external_download(&mut self, download_id: String, cx: &mut Context<Self>) {
+        let cancelled = self.transfer_state.update(cx, |state, _cx| {
+            state.cancel_external_download(&download_id)
+        });
+        if !cancelled {
+            return;
+        }
+
+        self.status_message = Some("Cancelled external download.".to_string());
+        self.persist_session_snapshot(cx);
+        cx.notify();
+    }
+
+    pub(super) fn pause_external_download(&mut self, download_id: String, cx: &mut Context<Self>) {
+        let paused = self
+            .transfer_state
+            .update(cx, |state, _cx| state.pause_external_download(&download_id));
+        if !paused {
+            return;
+        }
+
+        self.status_message = Some("Paused external download.".to_string());
+        self.persist_session_snapshot(cx);
+        cx.notify();
+    }
+
+    pub(super) fn resume_external_download(&mut self, download_id: String, cx: &mut Context<Self>) {
+        let resumed = self.transfer_state.update(cx, |state, _cx| {
+            state.resume_external_download(&download_id)
+        });
+        if !resumed {
+            return;
+        }
+
+        self.status_message = Some("Resumed external download.".to_string());
+        self.persist_session_snapshot(cx);
         cx.notify();
     }
 
@@ -86,11 +196,17 @@ impl OryxApp {
         &mut self,
         download_id: String,
         source_url: String,
+        destination: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) {
-        self.transfer
-            .queue_external_url_download_with_id(download_id, source_url.clone());
+        self.transfer.queue_external_url_download_with_id(
+            download_id,
+            source_url.clone(),
+            destination,
+            false,
+        );
         self.status_message = Some(format!("Retrying '{source_url}'."));
+        self.persist_session_snapshot(cx);
         cx.notify();
     }
 

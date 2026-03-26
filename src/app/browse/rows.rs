@@ -77,8 +77,13 @@ pub(super) fn download_progress_ratio(snapshot: ProgressiveSnapshot) -> Option<f
 }
 
 pub(super) fn download_progress_label(snapshot: Option<ProgressiveSnapshot>) -> String {
-    match snapshot.and_then(download_progress_ratio) {
-        Some(ratio) => format!("{}%", (ratio * 100.0).round() as u32),
+    match snapshot {
+        Some(snapshot) if snapshot.paused => "Paused".to_string(),
+        Some(snapshot) if snapshot.retrying => "Retrying…".to_string(),
+        Some(snapshot) => match download_progress_ratio(snapshot) {
+            Some(ratio) => format!("{}%", (ratio * 100.0).round() as u32),
+            None => "Downloading".to_string(),
+        },
         None => "Downloading".to_string(),
     }
 }

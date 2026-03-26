@@ -198,6 +198,12 @@ impl UiState {
         }
     }
 
+    pub(in crate::app) fn open_downloads_modal(&mut self) {
+        self.downloads_modal_open = true;
+        self.open_url_prompt_open = false;
+        self.open_url_error = None;
+    }
+
     pub(in crate::app) fn close_downloads_modal(&mut self) -> bool {
         let was_open = self.downloads_modal_open;
         self.downloads_modal_open = false;

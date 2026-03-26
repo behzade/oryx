@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui::Context;
 
-use crate::library::{Library, SessionSnapshot};
+use crate::library::{Library, PersistedExternalDownload, SessionSnapshot};
 use crate::model::{PlaybackStatus, RepeatMode, Track};
 use crate::provider::{CollectionSummary, TrackList};
 
@@ -27,6 +27,7 @@ pub(super) struct RestoredSessionState {
     pub(super) selected_local_album_id: Option<String>,
     pub(super) selected_local_artist_id: Option<String>,
     pub(super) selected_local_playlist_id: Option<String>,
+    pub(super) external_downloads: Vec<PersistedExternalDownload>,
 }
 
 pub(super) fn restored_session_state(
@@ -53,6 +54,7 @@ pub(super) fn restored_session_state(
             selected_local_album_id: None,
             selected_local_artist_id: None,
             selected_local_playlist_id: None,
+            external_downloads: Vec::new(),
         };
     };
 
@@ -128,6 +130,7 @@ pub(super) fn restored_session_state(
         selected_local_album_id: snapshot.selected_local_album_id,
         selected_local_artist_id: snapshot.selected_local_artist_id,
         selected_local_playlist_id: snapshot.selected_local_playlist_id,
+        external_downloads: snapshot.external_downloads,
     }
 }
 
@@ -160,6 +163,7 @@ pub(super) fn persist_session_snapshot(app: &OryxApp, cx: &gpui::App) {
         selected_local_album_id,
         selected_local_artist_id,
         selected_local_playlist_id,
+        external_downloads: app.transfer_state.read(cx).persisted_external_downloads(),
     };
 
     if let Err(error) = app.library.save_session_snapshot(&snapshot) {

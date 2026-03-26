@@ -3,6 +3,10 @@ mod library;
 mod playback_context;
 mod rows;
 
+use std::fs;
+use std::path::Path;
+use std::time::Instant;
+
 use gpui::prelude::*;
 use gpui::{
     App, Context, FontWeight, MouseButton, MouseDownEvent, ParentElement,
@@ -12,8 +16,10 @@ use gpui::{
 use crate::library::{
     ImportAlbumReview, ImportMetadataField, ImportMetadataSource, ImportReview, ImportTrackReview,
 };
+use crate::progressive::ProgressiveSnapshot;
 use crate::provider::{CollectionSummary, ProviderId, TrackList, TrackSummary};
 use crate::theme;
+use crate::url_media::fallback_download_name;
 
 use self::rows::{
     action_button, audio_quality_from_track_summary, collection_quality_metadata,
@@ -41,6 +47,259 @@ const SOURCE_MENU_WIDTH: f32 = 196.0;
 const SOURCE_MENU_TOP_OFFSET: f32 = 58.0;
 const PLAYBACK_CONTEXT_BREAKPOINT: f32 = 1180.0;
 const COMPACT_METADATA_BREAKPOINT: f32 = 1320.0;
+const STREAM_PLAYABLE_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Clone, Copy)]
+struct StreamButtonStyle {
+    background: u32,
+    border: u32,
+    text: u32,
+}
+
+#[derive(Clone, Copy)]
+struct DownloadActionStyle {
+    icon: u32,
+    border: u32,
+    background: u32,
+}
+
+fn stream_button_style(
+    snapshot: ProgressiveSnapshot,
+    started_at: Instant,
+    duration_seconds: Option<u64>,
+) -> Option<StreamButtonStyle> {
+    if snapshot.downloaded_bytes < STREAM_PLAYABLE_BYTES {
+        return None;
+    }
+
+    let Some(total_bytes) = snapshot.total_bytes else {
+        return Some(StreamButtonStyle {
+            background: theme::DOWNLOAD_PROGRESS_LIGHT,
+            border: theme::DOWNLOAD_PROGRESS,
+            text: theme::TEXT_PRIMARY,
+        });
+    };
+    let Some(duration_seconds) = duration_seconds.filter(|seconds| *seconds > 0) else {
+        return Some(StreamButtonStyle {
+            background: theme::DOWNLOAD_PROGRESS_LIGHT,
+            border: theme::DOWNLOAD_PROGRESS,
+            text: theme::TEXT_PRIMARY,
+        });
+    };
+
+    let elapsed_seconds = started_at.elapsed().as_secs_f64().max(1.0);
+    let speed_bytes_per_second = snapshot.downloaded_bytes as f64 / elapsed_seconds;
+    if speed_bytes_per_second <= 0.0 {
+        return Some(StreamButtonStyle {
+            background: 0xFF4A2E22,
+            border: 0xFFD48E7A,
+            text: 0xFFF0D5CB,
+        });
+    }
+
+    let remaining_bytes = total_bytes.saturating_sub(snapshot.downloaded_bytes) as f64;
+    let estimated_finish_seconds = remaining_bytes / speed_bytes_per_second;
+    let viability_ratio = estimated_finish_seconds / duration_seconds as f64;
+
+    Some(if viability_ratio <= 0.9 {
+        StreamButtonStyle {
+            background: 0xFF243A2A,
+            border: 0xFF8CCF9E,
+            text: 0xFFE2F4E6,
+        }
+    } else if viability_ratio <= 1.2 {
+        StreamButtonStyle {
+            background: 0xFF45351F,
+            border: 0xFFE0BE73,
+            text: 0xFFF5E7BE,
+        }
+    } else {
+        StreamButtonStyle {
+            background: 0xFF4A2E22,
+            border: 0xFFD48E7A,
+            text: 0xFFF0D5CB,
+        }
+    })
+}
+
+fn download_icon_button(icon: AppIcon, style: DownloadActionStyle, disabled: bool) -> gpui::Div {
+    div()
+        .w(px(30.))
+        .h(px(30.))
+        .rounded(px(theme::RADIUS_FULL))
+        .border_1()
+        .border_color(rgb(style.border))
+        .bg(rgb(style.background))
+        .when(!disabled, |this| this.cursor_pointer())
+        .when(disabled, |this| this.opacity(0.35))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(render_icon_with_color(icon, 15., style.icon))
+}
+
+fn neutral_download_action_style() -> DownloadActionStyle {
+    DownloadActionStyle {
+        icon: theme::TEXT_MUTED,
+        border: theme::BORDER_SUBTLE,
+        background: theme::SURFACE_FLOATING,
+    }
+}
+
+fn destructive_download_action_style() -> DownloadActionStyle {
+    DownloadActionStyle {
+        icon: 0xFFF0D5CB,
+        border: 0xFFD48E7A,
+        background: 0xFF4A2E22,
+    }
+}
+
+fn stream_download_action_style(style: StreamButtonStyle) -> DownloadActionStyle {
+    DownloadActionStyle {
+        icon: style.text,
+        border: style.border,
+        background: style.background,
+    }
+}
+
+fn format_byte_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+
+    let mut value = bytes as f64;
+    let mut unit_index = 0usize;
+    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else if value >= 10.0 {
+        format!("{value:.0} {}", UNITS[unit_index])
+    } else {
+        format!("{value:.1} {}", UNITS[unit_index])
+    }
+}
+
+fn download_filename(state: &DownloadItemState) -> Option<String> {
+    match state {
+        DownloadItemState::Queued { source_url, .. } => Some(fallback_download_name(source_url)),
+        DownloadItemState::Active {
+            destination,
+            source_url,
+            ..
+        } => destination
+            .as_deref()
+            .and_then(download_path_filename)
+            .or_else(|| source_url.as_deref().map(fallback_download_name)),
+        DownloadItemState::Completed { destination, .. } => download_path_filename(destination),
+        DownloadItemState::Failed {
+            destination,
+            source_url,
+            ..
+        } => destination
+            .as_deref()
+            .and_then(download_path_filename)
+            .or_else(|| Some(fallback_download_name(source_url))),
+    }
+}
+
+fn download_format_label(state: &DownloadItemState) -> Option<String> {
+    match state {
+        DownloadItemState::Queued { source_url, .. } => {
+            download_path_extension(Path::new(source_url))
+        }
+        DownloadItemState::Active { destination, .. } => {
+            destination.as_deref().and_then(download_path_extension)
+        }
+        DownloadItemState::Completed { destination, .. } => download_path_extension(destination),
+        DownloadItemState::Failed { destination, .. } => {
+            destination.as_deref().and_then(download_path_extension)
+        }
+    }
+}
+
+fn download_size_label(
+    state: &DownloadItemState,
+    snapshot: Option<ProgressiveSnapshot>,
+) -> Option<String> {
+    match state {
+        DownloadItemState::Queued { .. } | DownloadItemState::Active { .. } => {
+            let snapshot = snapshot?;
+            match snapshot.total_bytes {
+                Some(total_bytes) if snapshot.downloaded_bytes > 0 => Some(format!(
+                    "{} / {}",
+                    format_byte_size(snapshot.downloaded_bytes),
+                    format_byte_size(total_bytes)
+                )),
+                Some(total_bytes) => Some(format_byte_size(total_bytes)),
+                None if snapshot.downloaded_bytes > 0 => {
+                    Some(format_byte_size(snapshot.downloaded_bytes))
+                }
+                None => None,
+            }
+        }
+        DownloadItemState::Completed { destination, .. } => {
+            download_file_len(destination).map(format_byte_size)
+        }
+        DownloadItemState::Failed { destination, .. } => destination
+            .as_deref()
+            .and_then(download_file_len)
+            .map(|bytes| format!("Partial {}", format_byte_size(bytes))),
+    }
+}
+
+fn download_duration_label(state: &DownloadItemState) -> Option<String> {
+    match state {
+        DownloadItemState::Active {
+            duration_seconds, ..
+        } => duration_seconds
+            .and_then(|seconds| u32::try_from(seconds).ok())
+            .map(Some)
+            .map(format_duration),
+        _ => None,
+    }
+}
+
+fn download_metadata_line(
+    state: &DownloadItemState,
+    snapshot: Option<ProgressiveSnapshot>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(format) = download_format_label(state) {
+        parts.push(format);
+    }
+    if let Some(size) = download_size_label(state, snapshot) {
+        parts.push(size);
+    }
+    if let Some(duration) = download_duration_label(state) {
+        parts.push(duration);
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("  •  "))
+    }
+}
+
+fn download_path_filename(path: &Path) -> Option<String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+}
+
+fn download_path_extension(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| !ext.trim().is_empty())
+        .map(|ext| ext.to_ascii_uppercase())
+}
+
+fn download_file_len(path: &Path) -> Option<u64> {
+    fs::metadata(path).ok().map(|metadata| metadata.len())
+}
+
 pub(super) fn section_divider() -> gpui::Div {
     rows::section_divider()
 }
@@ -698,19 +957,32 @@ impl OryxApp {
 
             for download in downloads {
                 let download_id = download.id.clone();
-                let download_title = download.title.clone();
+                let cancel_download_id = download_id.clone();
+                let pause_download_id = download_id.clone();
                 let snapshot = match &download.state {
-                    DownloadItemState::Active { progress, .. } => Some(progress.snapshot()),
+                    DownloadItemState::Queued { progress, .. }
+                    | DownloadItemState::Active { progress, .. } => Some(progress.snapshot()),
                     _ => None,
                 };
+                let download_title = download_filename(&download.state)
+                    .filter(|filename| !filename.trim().is_empty())
+                    .unwrap_or_else(|| download.title.clone());
                 let progress_ratio = snapshot.and_then(download_progress_ratio).unwrap_or(0.0);
+                let is_paused = snapshot.is_some_and(|snapshot| snapshot.paused);
+                let is_external_pending = matches!(
+                    download.state,
+                    DownloadItemState::Queued { .. } | DownloadItemState::Active { .. }
+                ) && matches!(
+                    download.purpose,
+                    crate::transfer::DownloadPurpose::ExternalUrl
+                );
                 let purpose = match download.purpose {
                     crate::transfer::DownloadPurpose::Explicit => "Download",
                     crate::transfer::DownloadPurpose::PlaybackPrefetch => "Playback cache",
                     crate::transfer::DownloadPurpose::ExternalUrl => "External URL",
                 };
                 let secondary_line = match &download.state {
-                    DownloadItemState::Queued { source_url } => source_url.clone(),
+                    DownloadItemState::Queued { source_url, .. } => source_url.clone(),
                     DownloadItemState::Active {
                         source_url,
                         destination,
@@ -730,11 +1002,27 @@ impl OryxApp {
                         .map(|path| path.display().to_string())
                         .unwrap_or_else(|| error.clone()),
                 };
+                let metadata_line = download_metadata_line(&download.state, snapshot);
                 let status_label = match &download.state {
+                    DownloadItemState::Queued { .. } if is_paused => "Paused".to_string(),
                     DownloadItemState::Queued { .. } => "Resolving URL…".to_string(),
                     DownloadItemState::Active { .. } => download_progress_label(snapshot),
                     DownloadItemState::Completed { .. } => "Ready to open".to_string(),
                     DownloadItemState::Failed { error, .. } => error.clone(),
+                };
+                let stream_action = match (&download.state, snapshot, download.purpose) {
+                    (
+                        DownloadItemState::Active {
+                            destination: Some(destination),
+                            started_at,
+                            duration_seconds,
+                            ..
+                        },
+                        Some(snapshot),
+                        crate::transfer::DownloadPurpose::ExternalUrl,
+                    ) => stream_button_style(snapshot, started_at.clone(), *duration_seconds)
+                        .map(|style| (destination.clone(), style)),
+                    _ => None,
                 };
                 column = column.child(
                     div()
@@ -769,6 +1057,7 @@ impl OryxApp {
                                             div()
                                                 .flex_1()
                                                 .min_w_0()
+                                                .overflow_hidden()
                                                 .flex()
                                                 .flex_col()
                                                 .gap(px(2.))
@@ -776,16 +1065,28 @@ impl OryxApp {
                                                     div()
                                                         .text_size(px(theme::BODY_SIZE))
                                                         .font_weight(FontWeight::SEMIBOLD)
-                                                        .overflow_hidden()
+                                                        .truncate()
                                                         .child(download_title),
                                                 )
                                                 .child(
                                                     div()
                                                         .text_size(px(theme::SMALL_SIZE))
                                                         .text_color(rgb(theme::TEXT_DIM))
-                                                        .overflow_hidden()
+                                                        .truncate()
                                                         .child(secondary_line),
                                                 )
+                                                .when_some(
+                                                    metadata_line,
+                                                    |column, metadata_line| {
+                                                        column.child(
+                                                            div()
+                                                                .text_size(px(theme::SMALL_SIZE))
+                                                                .text_color(rgb(theme::TEXT_MUTED))
+                                                                .truncate()
+                                                                .child(metadata_line),
+                                                        )
+                                                    },
+                                                ),
                                         )
                                         .child(
                                             div()
@@ -796,48 +1097,143 @@ impl OryxApp {
                                                     }
                                                     _ => theme::DOWNLOAD_PROGRESS,
                                                 }))
-                                                .child(status_label)
-                                        )
+                                                .child(status_label),
+                                        ),
                                 )
                                 .when(
-                                    matches!(
-                                        download.state,
-                                        DownloadItemState::Completed { .. }
-                                            | DownloadItemState::Failed { .. }
-                                    ),
+                                    is_external_pending
+                                        || stream_action.is_some()
+                                        || matches!(
+                                            download.state,
+                                            DownloadItemState::Completed { .. }
+                                                | DownloadItemState::Failed { .. }
+                                        ),
                                     |card| {
-                                        let actions = div().flex().justify_end().gap(px(theme::SPACE_2));
+                                        let actions =
+                                            div().flex().justify_end().gap(px(theme::SPACE_2));
+                                        let actions = if is_external_pending {
+                                            let pause_icon = if is_paused {
+                                                AppIcon::Play
+                                            } else {
+                                                AppIcon::Pause
+                                            };
+                                            let actions = actions.child(
+                                                download_icon_button(
+                                                    pause_icon,
+                                                    neutral_download_action_style(),
+                                                    false,
+                                                )
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    cx.listener(
+                                                        move |this,
+                                                              _event: &MouseDownEvent,
+                                                              _window,
+                                                              cx| {
+                                                            if is_paused {
+                                                                this.resume_external_download(
+                                                                    pause_download_id.clone(),
+                                                                    cx,
+                                                                );
+                                                            } else {
+                                                                this.pause_external_download(
+                                                                    pause_download_id.clone(),
+                                                                    cx,
+                                                                );
+                                                            }
+                                                        },
+                                                    ),
+                                                ),
+                                            );
+                                            let actions = if let Some((destination, style)) =
+                                                stream_action.clone()
+                                            {
+                                                actions.child(
+                                                    download_icon_button(
+                                                        AppIcon::PlayCircle,
+                                                        stream_download_action_style(style),
+                                                        false,
+                                                    )
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        cx.listener(
+                                                            move |this,
+                                                                  _event: &MouseDownEvent,
+                                                                  _window,
+                                                                  cx| {
+                                                                this.open_external_download_in_mpv(
+                                                                    destination.clone(),
+                                                                    cx,
+                                                                );
+                                                            },
+                                                        ),
+                                                    ),
+                                                )
+                                            } else {
+                                                actions.child(download_icon_button(
+                                                    AppIcon::PlayCircle,
+                                                    neutral_download_action_style(),
+                                                    true,
+                                                ))
+                                            };
+                                            actions.child(
+                                                download_icon_button(
+                                                    AppIcon::X,
+                                                    destructive_download_action_style(),
+                                                    false,
+                                                )
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    cx.listener(
+                                                        move |this,
+                                                              _event: &MouseDownEvent,
+                                                              _window,
+                                                              cx| {
+                                                            this.cancel_external_download(
+                                                                cancel_download_id.clone(),
+                                                                cx,
+                                                            );
+                                                        },
+                                                    ),
+                                                ),
+                                            )
+                                        } else {
+                                            actions
+                                        };
                                         let actions = match &download.state {
-                                            DownloadItemState::Completed { destination, .. } => {
+                                            DownloadItemState::Completed {
+                                                destination, ..
+                                            } => {
                                                 let destination = destination.clone();
                                                 actions.child(
-                                                    div()
-                                                        .px(px(theme::SPACE_3))
-                                                        .py(px(theme::SPACE_2))
-                                                        .rounded(px(10.))
-                                                        .cursor_pointer()
-                                                        .bg(rgb(theme::SURFACE_FLOATING))
-                                                        .text_size(px(theme::SMALL_SIZE))
-                                                        .text_color(rgb(theme::TEXT_MUTED))
-                                                        .on_mouse_down(
-                                                            MouseButton::Left,
-                                                            cx.listener(
-                                                                move |this,
-                                                                      _event: &MouseDownEvent,
-                                                                      _window,
-                                                                      cx| {
-                                                                    this.open_external_download_in_mpv(
-                                                                        destination.clone(),
-                                                                        cx,
-                                                                    );
-                                                                },
-                                                            ),
-                                                        )
-                                                        .child("Open".to_string()),
+                                                    download_icon_button(
+                                                        AppIcon::PlayCircle,
+                                                        neutral_download_action_style(),
+                                                        false,
+                                                    )
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        cx.listener(
+                                                            move |this,
+                                                                  _event: &MouseDownEvent,
+                                                                  _window,
+                                                                  cx| {
+                                                                this.open_external_download_in_mpv(
+                                                                    destination.clone(),
+                                                                    cx,
+                                                                );
+                                                            },
+                                                        ),
+                                                    ),
                                                 )
                                             }
-                                            DownloadItemState::Failed { source_url, .. } => {
+                                            DownloadItemState::Failed {
+                                                source_url,
+                                                destination,
+                                                ..
+                                            } => {
                                                 let source_url = source_url.clone();
+                                                let destination = destination.clone();
                                                 actions.child(
                                                     div()
                                                         .px(px(theme::SPACE_3))
@@ -858,6 +1254,7 @@ impl OryxApp {
                                                                     this.retry_external_download(
                                                                         download_id.clone(),
                                                                         source_url.clone(),
+                                                                        destination.clone(),
                                                                         cx,
                                                                     );
                                                                 },
