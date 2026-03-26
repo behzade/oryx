@@ -81,9 +81,9 @@ pub(super) fn render_download_progress_line(snapshot: ProgressiveSnapshot) -> gp
 
     div()
         .absolute()
-        .top(px(1.))
-        .left(px(8.))
-        .right(px(8.))
+        .bottom(px(theme::SPACE_2))
+        .left(px(theme::SPACE_3))
+        .right(px(theme::SPACE_3))
         .h(px(2.))
         .rounded(px(999.))
         .overflow_hidden()
@@ -197,16 +197,7 @@ pub(super) fn row_shell(active: bool, height: f32, radius: f32) -> gpui::Div {
                     .border_color(rgb(theme::ROW_HOVER_BORDER))
             }
         })
-        .when(active, |row| {
-            row.child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .child(div().w(px(3.)).h_full().bg(rgb(theme::ACCENT_PRIMARY))),
-            )
-        })
+        .when(active, |row| row.border_l_4())
 }
 
 pub(super) fn clickable_row(
