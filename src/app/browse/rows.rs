@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use gpui::prelude::*;
 use gpui::{
     App, IntoElement, MouseButton, MouseDownEvent, ObjectFit, ParentElement, Styled, Window, div,
-    img, px, relative, rgb,
+    img, px, relative, rgb, rgba,
 };
 
 use crate::app::library::AudioQualityGrade;
@@ -183,11 +183,11 @@ pub(super) fn row_shell(active: bool, height: f32, radius: f32) -> gpui::Div {
         } else {
             theme::ROW_IDLE_BORDER
         }))
-        .bg(rgb(if active {
-            theme::ROW_ACTIVE_BG
+        .bg(if active {
+            rgba(theme::ROW_ACTIVE_BG)
         } else {
-            theme::ROW_IDLE_BG
-        }))
+            rgb(theme::ROW_IDLE_BG)
+        })
         .hover(move |style| {
             if active {
                 style

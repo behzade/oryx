@@ -157,11 +157,6 @@ impl ProgressiveDownload {
         state.cancelled
     }
 
-    pub fn is_paused(&self) -> bool {
-        let state = self.inner.state.lock().expect("progressive state poisoned");
-        state.paused
-    }
-
     pub fn failure_message(&self) -> Option<String> {
         let state = self.inner.state.lock().expect("progressive state poisoned");
         state.failure.clone()
@@ -461,11 +456,9 @@ mod tests {
         let download = ProgressiveDownload::new();
 
         download.pause();
-        assert!(download.is_paused());
         assert!(download.snapshot().paused);
 
         download.resume();
-        assert!(!download.is_paused());
         assert!(!download.snapshot().paused);
     }
 }

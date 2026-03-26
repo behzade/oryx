@@ -182,7 +182,17 @@ fn filtered_cached_album_track_lists_excludes_playlists() {
         },
     ];
 
-    let filtered = filtered_cached_album_track_lists(lists);
+    let filtered = filtered_cached_album_track_lists(
+        lists,
+        &HashSet::from([track_cache_key(&track_summary(
+            fixture_provider(),
+            "track-1",
+            "Track One",
+            Some("album-1"),
+            Some("Album One"),
+            Some("Artist One"),
+        ))]),
+    );
 
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].collection.reference.kind, CollectionKind::Album);
@@ -222,10 +232,161 @@ fn filtered_cached_album_track_lists_excludes_system_playlist_ghost_albums() {
         ),
     ];
 
-    let filtered = filtered_cached_album_track_lists(lists);
+    let filtered = filtered_cached_album_track_lists(
+        lists,
+        &HashSet::from([track_cache_key(&track_summary(
+            fixture_provider(),
+            "track-1",
+            "Track One",
+            Some("album-1"),
+            Some("Album One"),
+            Some("Artist One"),
+        ))]),
+    );
 
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].collection.title, "Album One");
+}
+
+#[test]
+fn filtered_cached_album_track_lists_excludes_albums_without_cached_songs() {
+    let cached_track = track_summary(
+        fixture_provider(),
+        "track-1",
+        "Track One",
+        Some("album-1"),
+        Some("Album One"),
+        Some("Artist One"),
+    );
+    let uncached_track = track_summary(
+        fixture_provider(),
+        "track-2",
+        "Track Two",
+        Some("album-2"),
+        Some("Album Two"),
+        Some("Artist Two"),
+    );
+    let lists = vec![
+        album_track_list(
+            "album-1",
+            "Album One",
+            Some("Artist One"),
+            None,
+            &[cached_track],
+        ),
+        album_track_list(
+            "album-2",
+            "Album Two",
+            Some("Artist Two"),
+            None,
+            &[uncached_track],
+        ),
+    ];
+
+    let filtered = filtered_cached_album_track_lists(
+        lists,
+        &HashSet::from([track_cache_key(&track_summary(
+            fixture_provider(),
+            "track-1",
+            "Track One",
+            Some("album-1"),
+            Some("Album One"),
+            Some("Artist One"),
+        ))]),
+    );
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].collection.title, "Album One");
+}
+
+#[test]
+fn filtered_cached_album_track_lists_keep_full_track_lists_for_mixed_albums() {
+    let cached_track = track_summary(
+        fixture_provider(),
+        "track-1",
+        "Track One",
+        Some("album-1"),
+        Some("Album One"),
+        Some("Artist One"),
+    );
+    let uncached_track = track_summary(
+        fixture_provider(),
+        "track-2",
+        "Track Two",
+        Some("album-1"),
+        Some("Album One"),
+        Some("Artist One"),
+    );
+    let lists = vec![album_track_list(
+        "album-1",
+        "Album One",
+        Some("Artist One"),
+        None,
+        &[cached_track, uncached_track],
+    )];
+
+    let filtered = filtered_cached_album_track_lists(
+        lists,
+        &HashSet::from([track_cache_key(&track_summary(
+            fixture_provider(),
+            "track-1",
+            "Track One",
+            Some("album-1"),
+            Some("Album One"),
+            Some("Artist One"),
+        ))]),
+    );
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].tracks.len(), 2);
+    assert_eq!(filtered[0].tracks[0].title, "Track One");
+    assert_eq!(filtered[0].tracks[1].title, "Track Two");
+    assert_eq!(filtered[0].collection.track_count, Some(2));
+}
+
+#[test]
+fn local_artists_keep_uncached_tracks_from_albums_with_cached_songs() {
+    let cached_track = track_summary(
+        fixture_provider(),
+        "track-1",
+        "Track One",
+        Some("album-1"),
+        Some("Album One"),
+        Some("Artist One"),
+    );
+    let uncached_track = track_summary(
+        fixture_provider(),
+        "track-2",
+        "Track Two",
+        Some("album-1"),
+        Some("Album One"),
+        Some("Artist One"),
+    );
+    let albums = filtered_cached_album_track_lists(
+        vec![album_track_list(
+            "album-1",
+            "Album One",
+            Some("Artist One"),
+            None,
+            &[cached_track, uncached_track],
+        )],
+        &HashSet::from([track_cache_key(&track_summary(
+            fixture_provider(),
+            "track-1",
+            "Track One",
+            Some("album-1"),
+            Some("Album One"),
+            Some("Artist One"),
+        ))]),
+    );
+
+    let artists = build_local_artist_lists(&albums);
+
+    assert_eq!(artists.len(), 1);
+    assert_eq!(artists[0].collection.title, "Artist One");
+    assert_eq!(artists[0].tracks.len(), 2);
+    assert_eq!(artists[0].tracks[0].title, "Track One");
+    assert_eq!(artists[0].tracks[1].title, "Track Two");
 }
 
 fn album_track_list(

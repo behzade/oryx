@@ -52,12 +52,17 @@ impl LibraryModule {
     pub(in crate::app) fn refresh(&mut self) {
         if let Ok(tracks) = self.library.cached_library_tracks() {
             let tracks = filtered_cached_library_tracks(tracks);
+            let cached_track_ids = tracks
+                .iter()
+                .map(|cached_track| track_cache_key(&cached_track.track))
+                .collect::<HashSet<_>>();
             let (cached_track_qualities, cached_collection_qualities) =
                 build_cached_quality_maps(&tracks);
             self.cached_track_qualities = cached_track_qualities;
             self.cached_collection_qualities = cached_collection_qualities;
             self.local_albums = filtered_cached_album_track_lists(
                 self.library.entity_album_track_lists().unwrap_or_default(),
+                &cached_track_ids,
             );
             self.local_artists = build_local_artist_lists(&self.local_albums);
         }

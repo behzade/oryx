@@ -83,12 +83,19 @@ pub(in crate::app) fn filtered_cached_library_tracks(
 
 pub(in crate::app) fn filtered_cached_album_track_lists(
     track_lists: Vec<TrackList>,
+    cached_track_ids: &HashSet<String>,
 ) -> Vec<TrackList> {
     track_lists
         .into_iter()
         .filter(|track_list| track_list.collection.reference.kind == CollectionKind::Album)
         .filter(|track_list| {
             track_list.collection.subtitle.as_deref() != Some(SYSTEM_PLAYLIST_SUBTITLE)
+        })
+        .filter(|track_list| {
+            track_list
+                .tracks
+                .iter()
+                .any(|track| cached_track_ids.contains(&track_cache_key(track)))
         })
         .collect()
 }
