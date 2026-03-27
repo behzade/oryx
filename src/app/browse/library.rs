@@ -13,10 +13,11 @@ use crate::transfer::DownloadPurpose;
 use super::super::track_cache_key;
 use super::super::ui::ContextMenuTarget;
 use super::rows::{
-    artist_album_metadata, clickable_row, empty_state, panel_body, render_collection_artwork,
-    render_download_progress_line, render_row_metadata, render_track_download_action,
-    render_track_like_action, render_track_list_artwork, row_shell, sidebar_primary_metadata,
-    sidebar_secondary_metadata, summarize_collection_quality, summarize_track_list_quality,
+    apply_previous_playing_row_style, artist_album_metadata, clickable_row, empty_state,
+    panel_body, render_collection_artwork, render_download_progress_line, render_row_metadata,
+    render_track_download_action, render_track_like_action, render_track_list_artwork, row_shell,
+    sidebar_primary_metadata, sidebar_secondary_metadata, summarize_collection_quality,
+    summarize_track_list_quality,
 };
 use super::{
     AppIcon, BrowseMode, CollectionKindLabel, OryxApp, format_duration,
@@ -288,6 +289,11 @@ impl OryxApp {
                         return items;
                     };
                     let playback_state = this.playback_state.read(cx);
+                    let pending_track_key = playback_state
+                        .pending_play_request()
+                        .as_ref()
+                        .and_then(|request| request.playback_context.tracks.get(request.index))
+                        .map(track_cache_key);
                     let current_playing_track_key = playback_state
                         .playback_context()
                         .as_ref()
@@ -301,8 +307,17 @@ impl OryxApp {
                     for index in range {
                         let track = track_list.tracks[index].clone();
                         let track_for_context_menu = track.clone();
-                        let active = current_playing_track_key.as_deref()
-                            == Some(track_cache_key(&track).as_str());
+                        let track_key = track_cache_key(&track);
+                        let is_pending =
+                            pending_track_key.as_deref() == Some(track_key.as_str());
+                        let is_current_playing =
+                            current_playing_track_key.as_deref() == Some(track_key.as_str());
+                        let is_previous_playing =
+                            pending_track_key.is_some() && is_current_playing && !is_pending;
+                        let active = pending_track_key
+                            .as_deref()
+                            .or(current_playing_track_key.as_deref())
+                            == Some(track_key.as_str());
                         let is_cached = this.track_is_cached(&track, cx);
                         let is_liked = this.track_is_liked(&track, cx);
                         let active_download = this.active_download(&track, cx);
@@ -334,6 +349,7 @@ impl OryxApp {
                             cx,
                         );
                         let row = row_shell(active, 82., 8.)
+                            .when(is_previous_playing, apply_previous_playing_row_style)
                             .cursor_pointer()
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -554,6 +570,11 @@ impl OryxApp {
                 let show_metadata = !this.should_show_compact_metadata(window);
                 let grouped_rows = artist_group_rows(&track_list);
                 let playback_state = this.playback_state.read(cx);
+                let pending_track_key = playback_state
+                    .pending_play_request()
+                    .as_ref()
+                    .and_then(|request| request.playback_context.tracks.get(request.index))
+                    .map(track_cache_key);
                 let current_playing_track_key = playback_state
                     .playback_context()
                     .as_ref()
@@ -665,8 +686,17 @@ impl OryxApp {
                         ArtistTrackRow::Track { index, track } => {
                             let track_index = index;
                             let track_for_context_menu = track.clone();
-                            let active = current_playing_track_key.as_deref()
-                                == Some(track_cache_key(&track).as_str());
+                            let track_key = track_cache_key(&track);
+                            let is_pending =
+                                pending_track_key.as_deref() == Some(track_key.as_str());
+                            let is_current_playing =
+                                current_playing_track_key.as_deref() == Some(track_key.as_str());
+                            let is_previous_playing =
+                                pending_track_key.is_some() && is_current_playing && !is_pending;
+                            let active = pending_track_key
+                                .as_deref()
+                                .or(current_playing_track_key.as_deref())
+                                == Some(track_key.as_str());
                             let is_cached = this.track_is_cached(&track, cx);
                             let is_liked = this.track_is_liked(&track, cx);
                             let active_download = this.active_download(&track, cx);
@@ -699,6 +729,7 @@ impl OryxApp {
                                 cx,
                             );
                             let row = row_shell(active, 82., 8.)
+                                .when(is_previous_playing, apply_previous_playing_row_style)
                                 .cursor_pointer()
                                 .on_mouse_down(
                                     MouseButton::Left,

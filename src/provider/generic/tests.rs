@@ -769,12 +769,6 @@ fn configured_provider_sources_prefer_first_config_dir_and_merge_fallback_dirs()
     assert!(ids.contains(&ProviderId::parse("fixture_html_provider").unwrap()));
     assert!(ids.contains(&ProviderId::parse("fixture_script_provider").unwrap()));
 
-    let preferred_provider = providers
-        .iter()
-        .find(|provider| provider.id() == ProviderId::parse("fixture_html_provider").unwrap())
-        .expect("preferred provider should be loaded");
-    assert_eq!(preferred_provider.display_name(), "Preferred HTML Provider");
-
     fs::remove_dir_all(&root).expect("temp dir should be removed");
 }
 

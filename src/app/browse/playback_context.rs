@@ -10,8 +10,8 @@ use crate::theme;
 
 use super::super::track_cache_key;
 use super::rows::{
-    empty_state, panel_body, render_collection_artwork, render_row_metadata,
-    summarize_track_list_quality,
+    apply_previous_playing_row_style, empty_state, panel_body, render_collection_artwork,
+    render_row_metadata, summarize_track_list_quality,
 };
 use super::{CollectionKindLabel, OryxApp, format_duration};
 
@@ -47,15 +47,25 @@ impl OryxApp {
             cx.processor(
                 move |this: &mut OryxApp, range: Range<usize>, _window, cx| {
                     let mut items = Vec::with_capacity(range.len());
-                    let Some(playback_context) = this.playback_state.read(cx).playback_context()
-                    else {
+                    let playback_state = this.playback_state.read(cx);
+                    let Some(playback_context) = playback_state.playback_context() else {
                         return items;
                     };
+                    let pending_index = playback_state.pending_play_request().and_then(|request| {
+                        let request_track = request.playback_context.tracks.get(request.index)?;
+                        playback_context.tracks.iter().position(|track| {
+                            track_cache_key(track) == track_cache_key(request_track)
+                        })
+                    });
+                    let current_index = playback_state.current_track_index();
+                    let active_index = pending_index.or(current_index);
 
                     for index in range {
                         let track = playback_context.tracks[index].clone();
-                        let active =
-                            this.playback_state.read(cx).current_track_index() == Some(index);
+                        let active = active_index == Some(index);
+                        let is_pending = pending_index == Some(index);
+                        let is_previous_playing =
+                            pending_index.is_some() && current_index == Some(index) && !is_pending;
                         let subtitle = format!(
                             "{}  •  {}",
                             track.artist.as_deref().unwrap_or("Unknown artist"),
@@ -78,6 +88,7 @@ impl OryxApp {
                                 } else {
                                     theme::SURFACE_FLOATING
                                 }))
+                                .when(is_previous_playing, apply_previous_playing_row_style)
                                 .px(px(theme::SPACE_3))
                                 .py(px(theme::SPACE_3))
                                 .cursor_pointer()

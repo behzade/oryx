@@ -154,6 +154,11 @@ pub(super) fn render_track_like_action(is_liked: bool) -> gpui::Div {
         )
 }
 
+pub(super) fn apply_previous_playing_row_style(row: gpui::Div) -> gpui::Div {
+    row.border_color(rgb(theme::ROW_TRANSITION_BORDER))
+        .bg(rgb(theme::ROW_TRANSITION_BG))
+}
+
 pub(super) fn panel_body(body: impl IntoElement) -> gpui::Div {
     div()
         .h_full()

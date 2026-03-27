@@ -270,6 +270,10 @@ impl PlaybackModule {
         self.play_loading
     }
 
+    pub(in crate::app) fn pending_play_request(&self) -> Option<PendingPlayRequest> {
+        self.pending_play_request.clone()
+    }
+
     pub(in crate::app) fn should_poll_runtime(&self) -> bool {
         if self.play_loading || self.pending_play_request.is_some() {
             return false;
