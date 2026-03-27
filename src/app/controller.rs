@@ -41,6 +41,11 @@ impl OryxApp {
             return;
         }
 
+        if !event.keystroke.modifiers.function && event.keystroke.key.as_str() == "escape" {
+            self.close_downloads_modal(cx);
+            return;
+        }
+
         let Some(intent) = Self::key_down_intent(event, focused_input) else {
             return;
         };
@@ -132,6 +137,11 @@ impl OryxApp {
         cx: &mut Context<Self>,
     ) {
         let modifiers = event.keystroke.modifiers;
+        if !modifiers.function && event.keystroke.key.as_str() == "escape" {
+            self.close_open_url_prompt(window, cx);
+            return;
+        }
+
         if focused_input == Some(TextInputId::OpenUrl)
             && let Some(shortcut) =
                 platform::map_text_input_shortcut(event.keystroke.key.as_str(), modifiers)
@@ -145,7 +155,7 @@ impl OryxApp {
         }
 
         match event.keystroke.key.as_str() {
-            "escape" => self.close_open_url_prompt(cx),
+            "escape" => self.close_open_url_prompt(window, cx),
             "tab" => {
                 self.focus_text_input(&TextInputId::OpenUrl, window);
                 cx.notify();

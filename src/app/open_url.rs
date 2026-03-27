@@ -61,15 +61,15 @@ impl OryxApp {
         cx.notify();
     }
 
-    pub(super) fn close_open_url_prompt(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_open_url_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.ui_state.read(cx).open_url_prompt_open() {
             return;
         }
 
         self.open_url_input.reset(String::new());
         self.update_ui_state(cx, |state| state.reset_open_url_prompt());
+        window.focus(&self.shell_focus_handle);
         self.status_message = Some("Open Media cancelled.".to_string());
-        self.show_notification("Open Media cancelled.", NotificationLevel::Info, cx);
         cx.notify();
     }
 
@@ -327,8 +327,8 @@ impl OryxApp {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(
-                                            |this, _event: &MouseDownEvent, _window, cx| {
-                                                this.close_open_url_prompt(cx);
+                                            |this, _event: &MouseDownEvent, window, cx| {
+                                                this.close_open_url_prompt(window, cx);
                                             },
                                         ),
                                     )
@@ -362,7 +362,7 @@ impl OryxApp {
             cx.listener(|this, _event: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 window.prevent_default();
-                this.close_open_url_prompt(cx);
+                this.close_open_url_prompt(window, cx);
             }),
         )
     }

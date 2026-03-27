@@ -138,19 +138,31 @@ fn download_icon_button(icon: AppIcon, style: DownloadActionStyle, disabled: boo
         .child(render_icon_with_color(icon, 15., style.icon))
 }
 
-fn chrome_icon_button(icon: AppIcon) -> gpui::Div {
+fn chrome_icon_button(icon: AppIcon, active: bool) -> gpui::Div {
     div()
         .px(px(theme::SPACE_2))
         .py(px(theme::SPACE_2))
         .rounded(px(10.))
         .border_1()
-        .border_color(rgb(theme::BORDER_SUBTLE))
+        .border_color(rgb(if active {
+            theme::ACCENT_PRIMARY
+        } else {
+            theme::BORDER_SUBTLE
+        }))
         .bg(rgb(theme::SURFACE_FLOATING))
         .cursor_pointer()
         .flex()
         .items_center()
         .justify_center()
-        .child(render_icon_with_color(icon, 16., theme::TEXT_MUTED))
+        .child(render_icon_with_color(
+            icon,
+            16.,
+            if active {
+                theme::ACCENT_PRIMARY
+            } else {
+                theme::TEXT_MUTED
+            },
+        ))
 }
 
 fn neutral_download_action_style() -> DownloadActionStyle {
@@ -942,6 +954,7 @@ impl OryxApp {
     pub(super) fn render_downloads_modal(&self, cx: &mut Context<Self>) -> gpui::Div {
         let downloads = self.transfer_state.read(cx).download_items();
         let active_download_count = downloads.iter().filter(|item| item.is_active()).count();
+        let open_url_prompt_open = self.ui_state.read(cx).open_url_prompt_open();
 
         let body = if downloads.is_empty() {
             div()
@@ -978,7 +991,7 @@ impl OryxApp {
                                         ),
                                 ),
                         )
-                        .child(chrome_icon_button(AppIcon::Plus).on_mouse_down(
+                        .child(chrome_icon_button(AppIcon::Plus, open_url_prompt_open).on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _event: &MouseDownEvent, window, cx| {
                                 this.open_url_prompt(window, cx);
@@ -1021,12 +1034,14 @@ impl OryxApp {
                                     }),
                             ),
                     )
-                    .child(chrome_icon_button(AppIcon::Plus).on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                            this.open_url_prompt(window, cx);
-                        }),
-                    )),
+                    .child(
+                        chrome_icon_button(AppIcon::Plus, open_url_prompt_open).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                                this.open_url_prompt(window, cx);
+                            }),
+                        ),
+                    ),
             );
 
             for download in downloads {

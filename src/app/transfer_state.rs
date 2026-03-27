@@ -170,6 +170,15 @@ impl TransferStateModel {
                 .any(ExternalDownloadItem::is_active)
     }
 
+    pub(super) fn active_download_count(&self) -> usize {
+        self.downloads.len()
+            + self
+                .external_downloads
+                .iter()
+                .filter(|item| item.is_active())
+                .count()
+    }
+
     pub(super) fn handle_worker_event(&mut self, event: TransferEvent, cx: &mut Context<Self>) {
         let mut changed = false;
         match &event {

@@ -60,6 +60,8 @@ impl OryxApp {
 
     fn render_topbar_actions(&self, cx: &mut Context<Self>) -> gpui::Div {
         let app_menu_open = self.ui_state.read(cx).app_menu_open();
+        let downloads_modal_open = self.ui_state.read(cx).downloads_modal_open();
+        let active_download_count = self.transfer_state.read(cx).active_download_count();
         div()
             .flex()
             .items_center()
@@ -98,11 +100,12 @@ impl OryxApp {
             )
             .child(
                 div()
+                    .relative()
                     .px(px(theme::SPACE_2))
                     .py(px(theme::SPACE_2))
                     .rounded(px(10.))
                     .border_1()
-                    .border_color(rgb(if self.ui_state.read(cx).downloads_modal_open() {
+                    .border_color(rgb(if downloads_modal_open {
                         theme::ACCENT_PRIMARY
                     } else {
                         theme::BORDER_SUBTLE
@@ -121,12 +124,28 @@ impl OryxApp {
                     .child(render_icon_with_color(
                         AppIcon::Download,
                         16.,
-                        if self.ui_state.read(cx).downloads_modal_open() {
+                        if downloads_modal_open {
                             theme::ACCENT_PRIMARY
                         } else {
                             theme::TEXT_MUTED
                         },
-                    )),
+                    ))
+                    .when(active_download_count > 0, |button| {
+                        let label = active_download_count.min(9).to_string();
+                        button.child(
+                            div()
+                                .absolute()
+                                .top(px(1.))
+                                .right(px(3.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(10.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(theme::ACCENT_PRIMARY))
+                                .child(label),
+                        )
+                    }),
             )
     }
 
