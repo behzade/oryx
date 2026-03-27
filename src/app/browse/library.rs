@@ -306,6 +306,15 @@ impl OryxApp {
                         let is_cached = this.track_is_cached(&track, cx);
                         let is_liked = this.track_is_liked(&track, cx);
                         let active_download = this.active_download(&track, cx);
+                        let explicit_download_active = matches!(
+                            active_download.as_ref().map(|download| download.purpose),
+                            Some(DownloadPurpose::Explicit)
+                        );
+                        let show_download_action = !is_cached
+                            && !matches!(
+                                active_download.as_ref().map(|download| download.purpose),
+                                Some(DownloadPurpose::PlaybackPrefetch)
+                            );
                         let download_progress = active_download
                             .as_ref()
                             .map(|download| download.progress.snapshot());
@@ -402,14 +411,9 @@ impl OryxApp {
                                             ),
                                         ),
                                     )
-                                    .when(!is_cached, |row| {
+                                    .when(show_download_action, |row| {
                                         row.child(
-                                            render_track_download_action(matches!(
-                                                active_download
-                                                    .as_ref()
-                                                    .map(|download| download.purpose),
-                                                Some(DownloadPurpose::Explicit)
-                                            ))
+                                            render_track_download_action(explicit_download_active)
                                             .on_mouse_down(
                                                 MouseButton::Left,
                                                 cx.listener(
@@ -418,12 +422,7 @@ impl OryxApp {
                                                           _window,
                                                           cx| {
                                                         cx.stop_propagation();
-                                                        if matches!(
-                                                            active_download
-                                                                .as_ref()
-                                                                .map(|download| download.purpose),
-                                                            Some(DownloadPurpose::Explicit)
-                                                        ) {
+                                                        if explicit_download_active {
                                                             this.cancel_download_track_at(index, cx);
                                                         } else {
                                                             this.download_track_at(index, cx);
@@ -671,6 +670,15 @@ impl OryxApp {
                             let is_cached = this.track_is_cached(&track, cx);
                             let is_liked = this.track_is_liked(&track, cx);
                             let active_download = this.active_download(&track, cx);
+                            let explicit_download_active = matches!(
+                                active_download.as_ref().map(|download| download.purpose),
+                                Some(DownloadPurpose::Explicit)
+                            );
+                            let show_download_action = !is_cached
+                                && !matches!(
+                                    active_download.as_ref().map(|download| download.purpose),
+                                    Some(DownloadPurpose::PlaybackPrefetch)
+                                );
                             let download_progress = active_download
                                 .as_ref()
                                 .map(|download| download.progress.snapshot());
@@ -762,14 +770,9 @@ impl OryxApp {
                                                 ),
                                             ),
                                         )
-                                        .when(!is_cached, |row| {
+                                        .when(show_download_action, |row| {
                                             row.child(
-                                                render_track_download_action(matches!(
-                                                    active_download
-                                                        .as_ref()
-                                                        .map(|download| download.purpose),
-                                                    Some(DownloadPurpose::Explicit)
-                                                ))
+                                                render_track_download_action(explicit_download_active)
                                                 .on_mouse_down(
                                                     MouseButton::Left,
                                                     cx.listener(
@@ -778,12 +781,7 @@ impl OryxApp {
                                                               _window,
                                                               cx| {
                                                             cx.stop_propagation();
-                                                            if matches!(
-                                                                active_download
-                                                                    .as_ref()
-                                                                    .map(|download| download.purpose),
-                                                                Some(DownloadPurpose::Explicit)
-                                                            ) {
+                                                            if explicit_download_active {
                                                                 this.cancel_download_track_at(track_index, cx);
                                                             } else {
                                                                 this.download_track_at(track_index, cx);

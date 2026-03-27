@@ -106,13 +106,11 @@ pub(super) fn render_track_download_action(is_cancel: bool) -> gpui::Div {
 
     div()
         .flex_shrink_0()
-        .rounded(px(8.))
-        .bg(rgb(0x00000000))
         .px(px(theme::SPACE_2))
         .py(px(theme::SPACE_2))
         .cursor_pointer()
         .child(
-            div().w(px(14.)).h(px(14.)).overflow_hidden().child(
+            div().w(px(16.)).h(px(16.)).overflow_hidden().child(
                 gpui::svg()
                     .path(if is_cancel {
                         AppIcon::X.asset_path()
