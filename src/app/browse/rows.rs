@@ -38,12 +38,14 @@ pub(super) fn sidebar_primary_metadata(subtitle: Option<&str>, kind_label: &str)
 }
 
 pub(super) fn sidebar_secondary_metadata(
-    kind_label: &str,
+    kind_label: Option<&str>,
     track_count: Option<usize>,
     primary_metadata: &str,
 ) -> Option<String> {
     let mut parts = Vec::new();
-    if primary_metadata != kind_label {
+    if let Some(kind_label) = kind_label
+        && primary_metadata != kind_label
+    {
         parts.push(kind_label.to_string());
     }
     if let Some(track_count) = track_count {
@@ -825,7 +827,11 @@ fn is_local_playlist(track_list: &TrackList) -> bool {
 fn is_local_artist(track_list: &TrackList) -> bool {
     track_list.collection.reference.kind == CollectionKind::Album
         && track_list.collection.reference.provider == ProviderId::Local
-        && track_list.collection.reference.id.starts_with("local-artist:")
+        && track_list
+            .collection
+            .reference
+            .id
+            .starts_with("local-artist:")
 }
 
 fn collection_artwork_fallback() -> gpui::Div {
@@ -854,7 +860,9 @@ pub(super) fn empty_state(message: &str) -> gpui::Div {
 
 #[cfg(test)]
 mod tests {
-    use super::{CollageTile, artist_album_collage_urls, artwork_collage_layout};
+    use super::{
+        CollageTile, artist_album_collage_urls, artwork_collage_layout, sidebar_secondary_metadata,
+    };
     use crate::provider::{
         CollectionKind, CollectionRef, CollectionSummary, ProviderId, TrackList, TrackRef,
         TrackSummary,
@@ -957,6 +965,14 @@ mod tests {
                 "https://cdn.example/track-a-variant.jpg".to_string(),
                 "https://cdn.example/album-b.jpg".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn sidebar_secondary_metadata_omits_kind_label_when_not_requested() {
+        assert_eq!(
+            sidebar_secondary_metadata(None, Some(12), "2 albums"),
+            Some("12 tracks".to_string())
         );
     }
 

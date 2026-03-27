@@ -99,7 +99,12 @@ impl LibraryModule {
         provider: crate::provider::ProviderId,
         collection_id: &str,
     ) {
-        let collection = CollectionRef::new(provider, collection_id.to_string(), CollectionKind::Album, None);
+        let collection = CollectionRef::new(
+            provider,
+            collection_id.to_string(),
+            CollectionKind::Album,
+            None,
+        );
         let cached_tracks = self
             .library
             .cached_library_tracks_for_collection(provider, collection_id)
@@ -243,7 +248,8 @@ impl LibraryModule {
                 .map(|cached_track| track_cache_key(&cached_track.track)),
         );
         self.cached_track_qualities.extend(track_qualities);
-        self.cached_collection_qualities.extend(collection_qualities);
+        self.cached_collection_qualities
+            .extend(collection_qualities);
     }
 
     fn remove_cached_state_for_collection(&mut self, collection: &CollectionRef) {

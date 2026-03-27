@@ -34,6 +34,7 @@ pub struct ReadyPlayback {
     pub current: Track,
     pub source: PlaybackSource,
     pub fully_cached: bool,
+    pub cache_changed: bool,
 }
 
 #[derive(Clone)]
@@ -405,6 +406,7 @@ fn ready_playback_from_prepared(
         current,
         source: prepared.source,
         fully_cached: prepared.fully_cached,
+        cache_changed: prepared.cache_changed,
     }
 }
 
@@ -599,9 +601,10 @@ mod tests {
             None,
             None,
         )
-            .expect("cached playback should resolve without a provider");
+        .expect("cached playback should resolve without a provider");
 
         assert!(playback.fully_cached);
+        assert!(!playback.cache_changed);
         match playback.source {
             PlaybackSource::LocalFile(path) => assert_eq!(path, audio_path),
             PlaybackSource::GrowingFile { .. } => panic!("expected local cached playback"),

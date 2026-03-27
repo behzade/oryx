@@ -107,7 +107,7 @@ impl OryxApp {
                             kind_label,
                         );
                         let secondary_metadata = sidebar_secondary_metadata(
-                            kind_label,
+                            (mode != BrowseMode::Artists).then_some(kind_label),
                             Some(track_list.tracks.len()),
                             &primary_metadata,
                         );

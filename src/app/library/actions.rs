@@ -245,10 +245,7 @@ impl OryxApp {
         });
     }
 
-    pub(in crate::app) fn refresh_local_playlists(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::app) fn refresh_local_playlists(&mut self, cx: &mut Context<Self>) {
         self.library_catalog.update(cx, |catalog, _cx| {
             catalog.refresh_playlists_only();
         });
@@ -271,11 +268,9 @@ impl OryxApp {
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let result = cx
                 .background_executor()
-                .spawn(
-                    async move {
-                        library.delete_collection_from_library(provider, &delete_collection_id)
-                    },
-                )
+                .spawn(async move {
+                    library.delete_collection_from_library(provider, &delete_collection_id)
+                })
                 .await;
 
             let _ = this.update(cx, move |this, cx| {
@@ -313,21 +308,23 @@ impl OryxApp {
         self.close_context_menu(cx);
         let browse_mode = self.browse_mode;
         let visible_track_list_before_delete = self.current_visible_track_list_cloned(cx);
-        let affected_collection = visible_track_list_before_delete
-            .as_ref()
-            .and_then(|track_list| {
-                track_list
-                    .tracks
-                    .iter()
-                    .find(|track| {
-                        track.reference.provider == provider && track.reference.id == track_id
-                    })
-                    .and_then(|track| {
-                        track.collection_id
-                            .clone()
-                            .map(|collection_id| (track.reference.provider, collection_id))
-                    })
-            });
+        let affected_collection =
+            visible_track_list_before_delete
+                .as_ref()
+                .and_then(|track_list| {
+                    track_list
+                        .tracks
+                        .iter()
+                        .find(|track| {
+                            track.reference.provider == provider && track.reference.id == track_id
+                        })
+                        .and_then(|track| {
+                            track
+                                .collection_id
+                                .clone()
+                                .map(|collection_id| (track.reference.provider, collection_id))
+                        })
+                });
         let library = self.library.clone();
         self.status_message = Some(format!("Removing '{title}' from library..."));
         cx.notify();

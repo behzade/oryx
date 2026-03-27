@@ -6,7 +6,7 @@ use gpui::{AsyncApp, Context, Entity, WeakEntity};
 
 use crate::library::RECENTLY_PLAYED_PLAYLIST_ID;
 use crate::provider::{CollectionKind, ProviderId, TrackList, TrackSummary};
-use crate::transfer::{DownloadPurpose, TransferEvent};
+use crate::transfer::{DownloadPurpose, ReadyPlayback, TransferEvent};
 
 use super::super::transfer_state::TransferStateModel;
 use super::super::ui::NotificationLevel;
@@ -99,14 +99,13 @@ impl OryxApp {
         let track_title = selected_track.title.clone();
         self.status_message = Some(format!("Downloading '{}'.", track_title));
         cx.notify();
-        self.transfer
-            .queue_download(
-                provider,
-                library,
-                selected_track,
-                Some(index),
-                collection_id_override,
-            );
+        self.transfer.queue_download(
+            provider,
+            library,
+            selected_track,
+            Some(index),
+            collection_id_override,
+        );
     }
 
     pub(in crate::app) fn cancel_download_track_at(
@@ -156,9 +155,12 @@ impl OryxApp {
         let track_ref = selected_track.reference.clone();
         let provider = self.provider_for_id(track_ref.provider);
         let library = self.library.clone();
-        let collection_id_override =
-            refreshable_collection_for_track_list(&playback_context, playback_context.tracks.get(index))
-                .map(|(_, collection_id)| collection_id);
+        let is_cached = self.track_is_cached(&selected_track, cx);
+        let collection_id_override = refreshable_collection_for_track_list(
+            &playback_context,
+            playback_context.tracks.get(index),
+        )
+        .map(|(_, collection_id)| collection_id);
         let play_nonce = self.playback_state.update(cx, |state, _cx| {
             state.begin_play_request(
                 PendingPlayRequest {
@@ -171,9 +173,14 @@ impl OryxApp {
                     browser_contains_track,
                 },
                 position.unwrap_or(Duration::ZERO),
+                !is_cached,
             )
         });
-        self.status_message = Some("Resolving, caching, and starting playback".to_string());
+        self.status_message = Some(if is_cached {
+            "Starting playback.".to_string()
+        } else {
+            "Resolving, caching, and starting playback".to_string()
+        });
         cx.notify();
         self.transfer.queue_play_request(
             play_nonce,
@@ -299,7 +306,6 @@ impl OryxApp {
                             request.playback_context.tracks.get(request.index),
                         );
                         let mut should_refresh_playlists = false;
-                        let mut should_refresh_library = playback.fully_cached;
                         if should_record_recently_played(&request.playback_context) {
                             let recently_played_track = request
                                 .playback_context
@@ -323,16 +329,25 @@ impl OryxApp {
                                     track.reference.id
                                 );
                             } else if has_recently_played_track {
-                                should_refresh_library = true;
                                 should_refresh_playlists = true;
                             }
                         }
-                        if should_refresh_library {
-                            if let Some((provider, collection_id)) = refreshable_collection {
-                                self.refresh_local_album_collection(provider, &collection_id, cx);
-                            } else if should_refresh_playlists && !playback.fully_cached {
+                        match playback_refresh_target(
+                            &playback,
+                            refreshable_collection,
+                            should_refresh_playlists,
+                        ) {
+                            PlaybackRefreshTarget::None => {}
+                            PlaybackRefreshTarget::PlaylistsOnly => {
                                 self.refresh_local_playlists(cx);
-                            } else {
+                            }
+                            PlaybackRefreshTarget::Album {
+                                provider,
+                                collection_id,
+                            } => {
+                                self.refresh_local_album_collection(provider, &collection_id, cx);
+                            }
+                            PlaybackRefreshTarget::FullLibrary => {
                                 self.refresh_local_library_views(cx);
                             }
                         }
@@ -446,22 +461,66 @@ fn matching_collection_for_track(
                 .as_deref()
                 .or(candidate.album.as_deref())
                 == Some(track_album)
-            && candidate.collection_subtitle.as_deref().or(candidate.artist.as_deref())
+            && candidate
+                .collection_subtitle
+                .as_deref()
+                .or(candidate.artist.as_deref())
                 == track_artist)
-            .then(|| (candidate.reference.provider, candidate_collection_id.clone()))
+            .then(|| {
+                (
+                    candidate.reference.provider,
+                    candidate_collection_id.clone(),
+                )
+            })
     })
 }
 
 fn is_local_artist_track_list(track_list: &TrackList) -> bool {
     track_list.collection.reference.provider == ProviderId::Local
         && track_list.collection.reference.kind == CollectionKind::Album
-        && track_list.collection.reference.id.starts_with("local-artist:")
+        && track_list
+            .collection
+            .reference
+            .id
+            .starts_with("local-artist:")
 }
 
 fn should_record_recently_played(playback_context: &TrackList) -> bool {
     let reference = &playback_context.collection.reference;
     !(reference.provider == crate::provider::ProviderId::Local
         && reference.id == RECENTLY_PLAYED_PLAYLIST_ID)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PlaybackRefreshTarget {
+    None,
+    PlaylistsOnly,
+    Album {
+        provider: ProviderId,
+        collection_id: String,
+    },
+    FullLibrary,
+}
+
+fn playback_refresh_target(
+    playback: &ReadyPlayback,
+    refreshable_collection: Option<(ProviderId, String)>,
+    playlists_changed: bool,
+) -> PlaybackRefreshTarget {
+    if playback.cache_changed {
+        if let Some((provider, collection_id)) = refreshable_collection {
+            PlaybackRefreshTarget::Album {
+                provider,
+                collection_id,
+            }
+        } else {
+            PlaybackRefreshTarget::FullLibrary
+        }
+    } else if playlists_changed {
+        PlaybackRefreshTarget::PlaylistsOnly
+    } else {
+        PlaybackRefreshTarget::None
+    }
 }
 
 fn track_for_recently_played(
@@ -478,6 +537,7 @@ fn track_for_recently_played(
 mod tests {
     use super::*;
     use crate::provider::{CollectionKind, CollectionRef, CollectionSummary, ProviderId, TrackRef};
+    use crate::{audio::PlaybackSource, model::Track};
 
     #[test]
     fn skips_recording_when_playing_from_recently_played_playlist() {
@@ -514,10 +574,42 @@ mod tests {
     }
 
     #[test]
+    fn playback_refresh_target_only_refreshes_playlists_for_recently_played_updates() {
+        assert_eq!(
+            playback_refresh_target(
+                &ready_playback(false),
+                Some((fixture_provider(), "album-1".to_string())),
+                true,
+            ),
+            PlaybackRefreshTarget::PlaylistsOnly
+        );
+    }
+
+    #[test]
+    fn playback_refresh_target_refreshes_album_when_cache_changed() {
+        assert_eq!(
+            playback_refresh_target(
+                &ready_playback(true),
+                Some((fixture_provider(), "album-1".to_string())),
+                true,
+            ),
+            PlaybackRefreshTarget::Album {
+                provider: fixture_provider(),
+                collection_id: "album-1".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn refreshable_collection_uses_track_collection_id_when_present() {
         let track_list = TrackList {
             collection: CollectionSummary {
-                reference: CollectionRef::new(ProviderId::Local, "local-artist:Artist", CollectionKind::Album, None),
+                reference: CollectionRef::new(
+                    ProviderId::Local,
+                    "local-artist:Artist",
+                    CollectionKind::Album,
+                    None,
+                ),
                 title: "Artist".to_string(),
                 subtitle: None,
                 artwork_url: None,
@@ -536,7 +628,12 @@ mod tests {
     fn refreshable_collection_falls_back_to_remote_album_reference() {
         let track_list = TrackList {
             collection: CollectionSummary {
-                reference: CollectionRef::new(fixture_provider(), "album-42", CollectionKind::Album, None),
+                reference: CollectionRef::new(
+                    fixture_provider(),
+                    "album-42",
+                    CollectionKind::Album,
+                    None,
+                ),
                 title: "Album".to_string(),
                 subtitle: None,
                 artwork_url: None,
@@ -695,6 +792,19 @@ mod tests {
             collection_id: None,
             collection_title: None,
             ..track_summary(id, None)
+        }
+    }
+
+    fn ready_playback(cache_changed: bool) -> ReadyPlayback {
+        ReadyPlayback {
+            current: Track::from_track_summary_with_source(
+                track_summary("track-1", None),
+                "/tmp/track.mp3".to_string(),
+                None,
+            ),
+            source: PlaybackSource::LocalFile("/tmp/track.mp3".into()),
+            fully_cached: true,
+            cache_changed,
         }
     }
 }

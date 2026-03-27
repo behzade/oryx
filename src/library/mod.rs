@@ -55,6 +55,7 @@ pub struct PreparedPlaybackTrack {
     pub bitrate_bps: Option<u32>,
     pub audio_format: Option<AudioFormat>,
     pub fully_cached: bool,
+    pub cache_changed: bool,
     pub cache_monitor: Option<ProgressiveDownload>,
 }
 

@@ -475,7 +475,7 @@ impl OryxApp {
                         let primary_metadata =
                             sidebar_primary_metadata(collection.subtitle.as_deref(), kind_label);
                         let secondary_metadata = sidebar_secondary_metadata(
-                            kind_label,
+                            Some(kind_label),
                             collection.track_count,
                             &primary_metadata,
                         );

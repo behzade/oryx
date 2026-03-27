@@ -321,11 +321,18 @@ impl PlaybackModule {
         &mut self,
         mut request: PendingPlayRequest,
         resume_position: Duration,
+        show_loading: bool,
     ) -> u64 {
         self.play_nonce += 1;
         request.request_id = self.play_nonce;
         self.pending_play_request = Some(request);
-        self.begin_playback_resolution(resume_position);
+        if show_loading {
+            self.begin_playback_resolution(resume_position);
+        } else {
+            self.resume_position = resume_position;
+            self.play_loading = false;
+            self.playback_status_before_loading = None;
+        }
         self.play_nonce
     }
 

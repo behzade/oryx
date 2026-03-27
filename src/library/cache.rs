@@ -131,6 +131,7 @@ pub(super) fn prepare_track_for_playback(
                 bitrate_bps,
                 audio_format,
                 fully_cached: true,
+                cache_changed: false,
                 cache_monitor: None,
             });
         }
@@ -166,6 +167,7 @@ pub(super) fn prepare_track_for_playback(
             bitrate_bps,
             audio_format,
             fully_cached: true,
+            cache_changed: true,
             cache_monitor: None,
         });
     }
@@ -224,6 +226,7 @@ pub(super) fn prepare_track_for_playback(
             bitrate_bps: None,
             audio_format: None,
             fully_cached: false,
+            cache_changed: false,
             cache_monitor: Some(monitor),
         });
     }
@@ -257,6 +260,7 @@ pub(super) fn prepare_track_for_playback(
         bitrate_bps,
         audio_format,
         fully_cached: true,
+        cache_changed: true,
         cache_monitor: None,
     })
 }
@@ -294,6 +298,7 @@ pub(super) fn prepare_cached_track_for_playback(
         bitrate_bps,
         audio_format,
         fully_cached: true,
+        cache_changed: false,
         cache_monitor: None,
     }))
 }
@@ -1007,8 +1012,25 @@ fn infer_audio_bitrate_bps(path: &Path) -> Result<Option<u32>> {
 }
 
 fn infer_audio_format(path: &Path) -> Option<AudioFormat> {
-    let extension = path.extension()?.to_str()?;
-    parse_audio_format(extension)
+    sniff_audio_format(path).or_else(|| {
+        let extension = path.extension()?.to_str()?;
+        parse_audio_format(extension)
+    })
+}
+
+fn sniff_audio_format(path: &Path) -> Option<AudioFormat> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut header = [0_u8; 16];
+    let bytes_read = file.read(&mut header).ok()?;
+    let header = &header[..bytes_read];
+
+    if header.starts_with(b"fLaC") {
+        Some(AudioFormat::Flac)
+    } else if header.starts_with(b"ID3") {
+        Some(AudioFormat::Mp3)
+    } else {
+        None
+    }
 }
 
 fn parse_audio_format(value: &str) -> Option<AudioFormat> {
@@ -1345,6 +1367,7 @@ fn extension_for_download(request: &DownloadRequest) -> Option<&'static str> {
 fn extension_for_mime_type(mime_type: &str) -> Option<&'static str> {
     match mime_type {
         "audio/mpeg" | "audio/mp3" => Some("mp3"),
+        "audio/flac" | "audio/x-flac" => Some("flac"),
         "audio/aac" | "audio/x-aac" => Some("aac"),
         "image/png" => Some("png"),
         "image/jpeg" | "image/jpg" => Some("jpg"),
@@ -1362,6 +1385,8 @@ fn extension_from_url(url: &str) -> Option<&'static str> {
 
     if path.ends_with(".mp3") {
         Some("mp3")
+    } else if path.ends_with(".flac") {
+        Some("flac")
     } else if path.ends_with(".aac") || path.ends_with(".m3u8") {
         Some("aac")
     } else if path.ends_with(".png") {
@@ -1979,11 +2004,27 @@ mod tests {
     fn derives_extensions() {
         assert_eq!(extension_from_url("https://example.com/a.mp3"), Some("mp3"));
         assert_eq!(
+            extension_from_url("https://example.com/a.flac"),
+            Some("flac")
+        );
+        assert_eq!(
             extension_from_url("https://example.com/master/playlist.m3u8"),
             Some("aac")
         );
+        assert_eq!(extension_for_mime_type("audio/flac"), Some("flac"));
         assert_eq!(extension_for_mime_type("audio/aac"), Some("aac"));
         assert_eq!(extension_for_mime_type("image/jpeg"), Some("jpg"));
+    }
+
+    #[test]
+    fn infers_flac_from_file_header_even_with_wrong_extension() {
+        let path =
+            std::env::temp_dir().join(format!("oryx-flac-header-{}.mp3", std::process::id()));
+        fs::write(&path, b"fLaCtest").expect("temp audio header should be written");
+
+        assert_eq!(infer_audio_format(&path), Some(AudioFormat::Flac));
+
+        fs::remove_file(path).expect("temp audio header should be removed");
     }
 
     #[test]
