@@ -187,6 +187,7 @@ impl TransferStateModel {
                 title,
                 purpose,
                 progress,
+                ..
             } => {
                 self.start_download(track_id.clone(), title.clone(), *purpose, progress.clone());
                 changed = true;

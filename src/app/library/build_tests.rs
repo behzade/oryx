@@ -62,6 +62,92 @@ fn local_artists_group_tracks_across_albums_and_use_local_artist_metadata() {
     );
     assert_eq!(artist.collection.track_count, Some(3));
     assert_eq!(artist.tracks.len(), 3);
+    assert_eq!(
+        artist.tracks[0].artwork_url.as_deref(),
+        Some("https://cdn.example/album-a.jpg")
+    );
+    assert_eq!(
+        artist.tracks[1].artwork_url.as_deref(),
+        Some("https://cdn.example/album-b.jpg")
+    );
+    assert_eq!(
+        artist.tracks[2].artwork_url.as_deref(),
+        Some("https://cdn.example/album-b.jpg")
+    );
+}
+
+#[test]
+fn local_artists_prefer_album_artwork_over_track_variants_for_grouped_tracks() {
+    let albums = vec![
+        TrackList {
+            collection: CollectionSummary {
+                reference: CollectionRef::new(
+                    fixture_provider(),
+                    "album-1",
+                    CollectionKind::Album,
+                    None,
+                ),
+                title: "Album One".to_string(),
+                subtitle: Some("Artist One".to_string()),
+                artwork_url: Some("https://cdn.example/album-1.jpg".to_string()),
+                track_count: Some(2),
+            },
+            tracks: vec![
+                TrackSummary {
+                    artwork_url: Some("https://cdn.example/track-1-variant.jpg".to_string()),
+                    ..track_summary(
+                        fixture_provider(),
+                        "track-1",
+                        "Track One",
+                        Some("album-1"),
+                        Some("Album One"),
+                        Some("Artist One"),
+                    )
+                },
+                TrackSummary {
+                    artwork_url: Some("https://cdn.example/track-2-variant.jpg".to_string()),
+                    ..track_summary(
+                        fixture_provider(),
+                        "track-2",
+                        "Track Two",
+                        Some("album-1"),
+                        Some("Album One"),
+                        Some("Artist One"),
+                    )
+                },
+            ],
+        },
+        album_track_list(
+            "album-2",
+            "Album Two",
+            Some("Artist One"),
+            Some("https://cdn.example/album-2.jpg"),
+            &[track_summary(
+                fixture_provider(),
+                "track-3",
+                "Track Three",
+                Some("album-2"),
+                Some("Album Two"),
+                Some("Artist One"),
+            )],
+        ),
+    ];
+
+    let artists = build_local_artist_lists(&albums);
+
+    assert_eq!(artists.len(), 1);
+    assert_eq!(
+        artists[0].tracks[0].artwork_url.as_deref(),
+        Some("https://cdn.example/album-1.jpg")
+    );
+    assert_eq!(
+        artists[0].tracks[1].artwork_url.as_deref(),
+        Some("https://cdn.example/album-1.jpg")
+    );
+    assert_eq!(
+        artists[0].tracks[2].artwork_url.as_deref(),
+        Some("https://cdn.example/album-2.jpg")
+    );
 }
 
 #[test]

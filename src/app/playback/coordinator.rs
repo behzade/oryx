@@ -188,8 +188,20 @@ impl OryxApp {
         );
         match event {
             TransferEvent::DownloadStarted { .. } => {}
-            TransferEvent::DownloadCompleted { title, purpose, .. } => {
-                self.refresh_local_library_views(cx);
+            TransferEvent::DownloadCompleted {
+                title,
+                provider,
+                collection_id,
+                purpose,
+                ..
+            } => {
+                if let Some(collection_id) = collection_id.as_deref() {
+                    self.library_catalog.update(cx, |catalog, _cx| {
+                        catalog.refresh_album_collection(provider, collection_id);
+                    });
+                } else {
+                    self.refresh_local_library_views(cx);
+                }
                 if matches!(purpose, DownloadPurpose::Explicit) {
                     self.status_message = Some(format!("Saved '{}' for offline playback.", title));
                     self.show_notification(

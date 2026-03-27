@@ -140,6 +140,14 @@ impl Library {
         cache::cached_library_tracks(self)
     }
 
+    pub fn cached_library_tracks_for_collection(
+        &self,
+        provider: ProviderId,
+        collection_id: &str,
+    ) -> Result<Vec<CachedLibraryTrack>> {
+        cache::cached_library_tracks_for_collection(self, provider, collection_id)
+    }
+
     pub fn entity_playlist_track_lists(&self) -> Result<Vec<TrackList>> {
         let connection = self.open_connection()?;
         entities::playlist_track_lists(&connection)

@@ -107,6 +107,40 @@ impl LibraryModule {
         );
     }
 
+    pub(in crate::app) fn refresh_album_collection(
+        &mut self,
+        provider: crate::provider::ProviderId,
+        collection_id: &str,
+    ) {
+        let collection = CollectionRef::new(provider, collection_id.to_string(), CollectionKind::Album, None);
+        let cached_tracks = self
+            .library
+            .cached_library_tracks_for_collection(provider, collection_id)
+            .unwrap_or_default();
+        let cached_track_ids = cached_tracks
+            .iter()
+            .map(|cached_track| track_cache_key(&cached_track.track))
+            .collect::<HashSet<_>>();
+
+        self.remove_cached_state_for_collection(&collection);
+        self.insert_cached_state(&cached_tracks);
+
+        let updated_album = self
+            .library
+            .load_collection_track_list(&collection)
+            .ok()
+            .flatten()
+            .and_then(|track_list| {
+                filtered_cached_album_track_lists(vec![track_list], &cached_track_ids)
+                    .into_iter()
+                    .next()
+            });
+
+        self.upsert_local_album(updated_album, &collection);
+        self.local_artists = build_local_artist_lists(&self.local_albums);
+        self.reconcile_local_selections();
+    }
+
     pub(in crate::app) fn album_count(&self) -> usize {
         self.local_albums.len()
     }
@@ -206,5 +240,81 @@ impl LibraryModule {
 
     pub(in crate::app) fn enrich_track_list(&self, track_list: &mut TrackList) {
         enrich_track_list_with_cached_qualities(track_list, &self.cached_track_qualities);
+    }
+
+    fn insert_cached_state(&mut self, tracks: &[crate::library::CachedLibraryTrack]) {
+        let (track_qualities, collection_qualities) = build_cached_quality_maps(tracks);
+        self.cached_track_ids.extend(
+            tracks
+                .iter()
+                .map(|cached_track| track_cache_key(&cached_track.track)),
+        );
+        self.cached_track_qualities.extend(track_qualities);
+        self.cached_collection_qualities.extend(collection_qualities);
+    }
+
+    fn remove_cached_state_for_collection(&mut self, collection: &CollectionRef) {
+        if let Some(existing_album) = self.local_albums.iter().find(|track_list| {
+            track_list.collection.reference.provider == collection.provider
+                && track_list.collection.reference.id == collection.id
+        }) {
+            for track in &existing_album.tracks {
+                let track_key = track_cache_key(track);
+                self.cached_track_ids.remove(&track_key);
+                self.cached_track_qualities.remove(&track_key);
+            }
+        }
+        self.cached_collection_qualities
+            .remove(&collection_browser_key(collection));
+    }
+
+    fn upsert_local_album(&mut self, track_list: Option<TrackList>, collection: &CollectionRef) {
+        self.local_albums.retain(|existing| {
+            !(existing.collection.reference.provider == collection.provider
+                && existing.collection.reference.id == collection.id)
+        });
+
+        if let Some(track_list) = track_list {
+            self.local_albums.push(track_list);
+            self.local_albums.sort_by(|left, right| {
+                left.collection
+                    .title
+                    .to_lowercase()
+                    .cmp(&right.collection.title.to_lowercase())
+                    .then_with(|| {
+                        left.collection
+                            .subtitle
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .cmp(
+                                &right
+                                    .collection
+                                    .subtitle
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .to_lowercase(),
+                            )
+                    })
+            });
+        }
+    }
+
+    fn reconcile_local_selections(&mut self) {
+        self.selected_local_album_id = pick_existing_or_first(
+            BrowseMode::Albums,
+            self.selected_local_album_id.take(),
+            &self.local_albums,
+        );
+        self.selected_local_artist_id = pick_existing_or_first(
+            BrowseMode::Artists,
+            self.selected_local_artist_id.take(),
+            &self.local_artists,
+        );
+        self.selected_local_playlist_id = pick_existing_or_first(
+            BrowseMode::Playlists,
+            self.selected_local_playlist_id.take(),
+            &self.local_playlists,
+        );
     }
 }

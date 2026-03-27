@@ -586,14 +586,8 @@ pub(super) fn render_track_list_artwork(track_list: &TrackList, size: f32) -> gp
             .find_map(|track| track.artwork_url.clone())
     });
 
-    if is_local_playlist(track_list) {
-        let artwork_urls = track_list
-            .tracks
-            .iter()
-            .filter_map(|track| track.artwork_url.clone())
-            .filter(|artwork| !artwork.trim().is_empty())
-            .take(4)
-            .collect::<Vec<_>>();
+    if supports_artwork_collage(track_list) {
+        let artwork_urls = artwork_collage_urls(track_list);
 
         if artwork_urls.len() >= 2 {
             return render_artwork_collage(&artwork_urls, size);
@@ -607,11 +601,71 @@ pub(super) fn render_track_list_artwork(track_list: &TrackList, size: f32) -> gp
     render_collection_artwork(fallback_artwork, size)
 }
 
+fn artwork_collage_urls(track_list: &TrackList) -> Vec<String> {
+    if is_local_artist(track_list) {
+        return artist_album_collage_urls(track_list);
+    }
+
+    let mut seen = HashSet::new();
+
+    track_list
+        .tracks
+        .iter()
+        .filter_map(|track| track.artwork_url.as_deref())
+        .map(str::trim)
+        .filter(|artwork| !artwork.is_empty())
+        .filter(|artwork| seen.insert((*artwork).to_string()))
+        .take(4)
+        .map(str::to_string)
+        .collect()
+}
+
+fn artist_album_collage_urls(track_list: &TrackList) -> Vec<String> {
+    let mut artwork_urls = Vec::new();
+    let mut current_album_key: Option<String> = None;
+    let mut current_album_artwork: Option<String> = None;
+
+    for track in &track_list.tracks {
+        let album_key = track
+            .collection_id
+            .clone()
+            .or_else(|| track.collection_title.clone())
+            .unwrap_or_else(|| track.reference.id.clone());
+        let track_artwork = track
+            .artwork_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|artwork| !artwork.is_empty())
+            .map(str::to_string);
+
+        if current_album_key.as_deref() != Some(album_key.as_str()) {
+            if let Some(artwork_url) = current_album_artwork.take() {
+                artwork_urls.push(artwork_url);
+                if artwork_urls.len() == 4 {
+                    return artwork_urls;
+                }
+            }
+            current_album_key = Some(album_key);
+            current_album_artwork = track_artwork;
+            continue;
+        }
+
+        if current_album_artwork.is_none() {
+            current_album_artwork = track_artwork;
+        }
+    }
+
+    if let Some(artwork_url) = current_album_artwork {
+        artwork_urls.push(artwork_url);
+    }
+
+    artwork_urls.truncate(4);
+    artwork_urls
+}
+
 fn render_artwork_collage(artwork_urls: &[String], size: f32) -> gpui::Div {
     let corner_radius = 10.;
     let gap = 1.;
-    let tile_size = ((size - gap) / 2.0).max(1.0);
-    let second_offset = tile_size + gap;
     let frame = div()
         .w(px(size))
         .h(px(size))
@@ -623,32 +677,115 @@ fn render_artwork_collage(artwork_urls: &[String], size: f32) -> gpui::Div {
         .bg(rgb(theme::SURFACE_BASE))
         .relative();
 
-    let tiles = [
-        (0., 0.),
-        (second_offset, 0.),
-        (0., second_offset),
-        (second_offset, second_offset),
-    ];
     let mut collage = frame;
-    for (index, (left, top)) in tiles.into_iter().enumerate() {
+    for (tile, artwork_url) in artwork_collage_layout(artwork_urls.len(), size, gap)
+        .into_iter()
+        .zip(artwork_urls.iter().cloned())
+    {
         collage = collage.child(
             div()
                 .absolute()
-                .left(px(left))
-                .top(px(top))
-                .w(px(tile_size))
-                .h(px(tile_size))
+                .left(px(tile.left))
+                .top(px(tile.top))
+                .w(px(tile.width))
+                .h(px(tile.height))
                 .bg(rgb(theme::SURFACE_BASE))
-                .child(render_collage_tile(
-                    artwork_urls
-                        .get(index)
-                        .cloned()
-                        .or_else(|| artwork_urls.last().cloned()),
-                )),
+                .child(render_collage_tile(Some(artwork_url))),
         );
     }
 
     collage
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CollageTile {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+fn artwork_collage_layout(tile_count: usize, size: f32, gap: f32) -> Vec<CollageTile> {
+    match tile_count.min(4) {
+        0 => Vec::new(),
+        1 => vec![CollageTile {
+            left: 0.,
+            top: 0.,
+            width: size.max(1.0),
+            height: size.max(1.0),
+        }],
+        2 => {
+            let tile_width = ((size - gap) / 2.0).max(1.0);
+            vec![
+                CollageTile {
+                    left: 0.,
+                    top: 0.,
+                    width: tile_width,
+                    height: size.max(1.0),
+                },
+                CollageTile {
+                    left: tile_width + gap,
+                    top: 0.,
+                    width: tile_width,
+                    height: size.max(1.0),
+                },
+            ]
+        }
+        3 => {
+            let column_width = ((size - gap) / 2.0).max(1.0);
+            let stacked_height = ((size - gap) / 2.0).max(1.0);
+            vec![
+                CollageTile {
+                    left: 0.,
+                    top: 0.,
+                    width: column_width,
+                    height: size.max(1.0),
+                },
+                CollageTile {
+                    left: column_width + gap,
+                    top: 0.,
+                    width: column_width,
+                    height: stacked_height,
+                },
+                CollageTile {
+                    left: column_width + gap,
+                    top: stacked_height + gap,
+                    width: column_width,
+                    height: stacked_height,
+                },
+            ]
+        }
+        _ => {
+            let tile_size = ((size - gap) / 2.0).max(1.0);
+            let second_offset = tile_size + gap;
+            vec![
+                CollageTile {
+                    left: 0.,
+                    top: 0.,
+                    width: tile_size,
+                    height: tile_size,
+                },
+                CollageTile {
+                    left: second_offset,
+                    top: 0.,
+                    width: tile_size,
+                    height: tile_size,
+                },
+                CollageTile {
+                    left: 0.,
+                    top: second_offset,
+                    width: tile_size,
+                    height: tile_size,
+                },
+                CollageTile {
+                    left: second_offset,
+                    top: second_offset,
+                    width: tile_size,
+                    height: tile_size,
+                },
+            ]
+        }
+    }
 }
 
 fn render_collage_tile(artwork_url: Option<String>) -> gpui::Div {
@@ -676,9 +813,19 @@ fn render_collage_tile(artwork_url: Option<String>) -> gpui::Div {
     }
 }
 
+fn supports_artwork_collage(track_list: &TrackList) -> bool {
+    is_local_playlist(track_list) || is_local_artist(track_list)
+}
+
 fn is_local_playlist(track_list: &TrackList) -> bool {
     track_list.collection.reference.kind == CollectionKind::Playlist
         && track_list.collection.reference.provider == ProviderId::Local
+}
+
+fn is_local_artist(track_list: &TrackList) -> bool {
+    track_list.collection.reference.kind == CollectionKind::Album
+        && track_list.collection.reference.provider == ProviderId::Local
+        && track_list.collection.reference.id.starts_with("local-artist:")
 }
 
 fn collection_artwork_fallback() -> gpui::Div {
@@ -703,4 +850,134 @@ pub(super) fn empty_state(message: &str) -> gpui::Div {
         .text_size(px(theme::BODY_SIZE))
         .text_color(rgb(theme::TEXT_DIM))
         .child(message.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CollageTile, artist_album_collage_urls, artwork_collage_layout};
+    use crate::provider::{
+        CollectionKind, CollectionRef, CollectionSummary, ProviderId, TrackList, TrackRef,
+        TrackSummary,
+    };
+
+    #[test]
+    fn artwork_collage_layout_uses_two_panel_split_for_two_images() {
+        assert_eq!(
+            artwork_collage_layout(2, 62., 1.),
+            vec![
+                CollageTile {
+                    left: 0.,
+                    top: 0.,
+                    width: 30.5,
+                    height: 62.,
+                },
+                CollageTile {
+                    left: 31.5,
+                    top: 0.,
+                    width: 30.5,
+                    height: 62.,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn artwork_collage_layout_uses_three_tile_composition_for_three_images() {
+        assert_eq!(
+            artwork_collage_layout(3, 62., 1.),
+            vec![
+                CollageTile {
+                    left: 0.,
+                    top: 0.,
+                    width: 30.5,
+                    height: 62.,
+                },
+                CollageTile {
+                    left: 31.5,
+                    top: 0.,
+                    width: 30.5,
+                    height: 30.5,
+                },
+                CollageTile {
+                    left: 31.5,
+                    top: 31.5,
+                    width: 30.5,
+                    height: 30.5,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn local_artist_collage_uses_one_image_per_album() {
+        let track_list = TrackList {
+            collection: CollectionSummary {
+                reference: CollectionRef::new(
+                    ProviderId::Local,
+                    "local-artist:Artist One",
+                    CollectionKind::Album,
+                    None,
+                ),
+                title: "Artist One".to_string(),
+                subtitle: Some("2 albums".to_string()),
+                artwork_url: None,
+                track_count: Some(4),
+            },
+            tracks: vec![
+                track_summary(
+                    "track-1",
+                    Some("album-a"),
+                    Some("Album A"),
+                    Some("https://cdn.example/track-a-variant.jpg"),
+                ),
+                track_summary(
+                    "track-2",
+                    Some("album-a"),
+                    Some("Album A"),
+                    Some("https://cdn.example/album-a.jpg"),
+                ),
+                track_summary(
+                    "track-3",
+                    Some("album-b"),
+                    Some("Album B"),
+                    Some("https://cdn.example/album-b.jpg"),
+                ),
+                track_summary(
+                    "track-4",
+                    Some("album-b"),
+                    Some("Album B"),
+                    Some("https://cdn.example/track-b-variant.jpg"),
+                ),
+            ],
+        };
+
+        assert_eq!(
+            artist_album_collage_urls(&track_list),
+            vec![
+                "https://cdn.example/track-a-variant.jpg".to_string(),
+                "https://cdn.example/album-b.jpg".to_string(),
+            ]
+        );
+    }
+
+    fn track_summary(
+        id: &str,
+        collection_id: Option<&str>,
+        collection_title: Option<&str>,
+        artwork_url: Option<&str>,
+    ) -> TrackSummary {
+        TrackSummary {
+            reference: TrackRef::new(ProviderId::Local, id, None, Some(id.to_string())),
+            title: id.to_string(),
+            artist: Some("Artist One".to_string()),
+            album: collection_title.map(str::to_string),
+            collection_id: collection_id.map(str::to_string),
+            collection_title: collection_title.map(str::to_string),
+            collection_subtitle: Some("Artist One".to_string()),
+            duration_seconds: None,
+            bitrate_bps: None,
+            audio_format: None,
+            artwork_url: artwork_url.map(str::to_string),
+        }
+    }
 }

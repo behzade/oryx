@@ -126,6 +126,12 @@ pub(in crate::app) fn build_local_artist_lists(albums: &[TrackList]) -> Vec<Trac
                 .or_else(|| track.artist.clone())
                 .or_else(|| fallback_artist.clone())
                 .unwrap_or_else(|| "Unknown artist".to_string());
+            let mut track = track;
+            track.artwork_url = album
+                .collection
+                .artwork_url
+                .clone()
+                .or(track.artwork_url);
             let group = groups.entry(artist.clone()).or_insert_with(|| ArtistGroup {
                 artwork_url: None,
                 album_ids: HashSet::new(),
@@ -135,11 +141,7 @@ pub(in crate::app) fn build_local_artist_lists(albums: &[TrackList]) -> Vec<Trac
                 .album_ids
                 .insert(album.collection.reference.id.clone());
             if group.artwork_url.is_none() {
-                group.artwork_url = album
-                    .collection
-                    .artwork_url
-                    .clone()
-                    .or_else(|| track.artwork_url.clone());
+                group.artwork_url = track.artwork_url.clone();
             }
             group.tracks.push(track);
         }

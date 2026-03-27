@@ -404,6 +404,85 @@ pub(super) fn cached_library_tracks(library: &Library) -> Result<Vec<CachedLibra
     Ok(tracks)
 }
 
+pub(super) fn cached_library_tracks_for_collection(
+    library: &Library,
+    provider: ProviderId,
+    collection_id: &str,
+) -> Result<Vec<CachedLibraryTrack>> {
+    let connection = library.open_connection()?;
+    let mut statement = connection.prepare(
+        r#"
+        SELECT
+            provider,
+            track_id,
+            canonical_url,
+            artist,
+            album,
+            title,
+            collection_id,
+            collection_title,
+            collection_subtitle,
+            track_position,
+            duration_seconds,
+            bitrate_bps,
+            audio_format,
+            artwork_path
+        FROM cached_tracks
+        WHERE provider = ?1 AND collection_id = ?2
+        ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE
+        "#,
+    )?;
+
+    let rows = statement.query_map(params![provider.as_str(), collection_id], |row| {
+        let provider: String = row.get(0)?;
+        let track_id: String = row.get(1)?;
+        let canonical_url: Option<String> = row.get(2)?;
+        let artist: Option<String> = row.get(3)?;
+        let album: Option<String> = row.get(4)?;
+        let title: String = row.get(5)?;
+        let collection_id: Option<String> = row.get(6)?;
+        let collection_title: Option<String> = row.get(7)?;
+        let collection_subtitle: Option<String> = row.get(8)?;
+        let _track_position: Option<usize> = row.get(9)?;
+        let duration_seconds: Option<u32> = row.get(10)?;
+        let bitrate_bps: Option<u32> = row.get(11)?;
+        let audio_format: Option<String> = row.get(12)?;
+        let artwork_path: Option<String> = row.get(13)?;
+
+        let provider_id = ProviderId::parse(&provider).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                format!("unknown provider '{provider}'").into(),
+            )
+        })?;
+
+        Ok(CachedLibraryTrack {
+            track: TrackSummary {
+                reference: TrackRef::new(provider_id, track_id, canonical_url, Some(title.clone())),
+                title,
+                artist,
+                album,
+                collection_id,
+                collection_title,
+                collection_subtitle,
+                duration_seconds,
+                bitrate_bps,
+                audio_format: audio_format.and_then(|value| parse_audio_format(&value)),
+                artwork_url: artwork_path.clone(),
+            },
+            collection_provider: provider_id,
+        })
+    })?;
+
+    let mut tracks = Vec::new();
+    for row in rows {
+        tracks.push(row?);
+    }
+
+    Ok(tracks)
+}
+
 pub(super) fn delete_collection_from_library(
     library: &Library,
     provider: ProviderId,

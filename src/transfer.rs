@@ -56,6 +56,8 @@ pub enum TransferEvent {
     DownloadCompleted {
         track_id: String,
         title: String,
+        provider: crate::provider::ProviderId,
+        collection_id: Option<String>,
         purpose: DownloadPurpose,
     },
     DownloadCancelled {
@@ -189,6 +191,8 @@ impl TransferManager {
                     Ok(()) => TransferEvent::DownloadCompleted {
                         track_id,
                         title,
+                        provider: selected_track.reference.provider,
+                        collection_id: selected_track.collection_id.clone(),
                         purpose: DownloadPurpose::Explicit,
                     },
                     Err(_error) if progress.is_cancelled() => {
@@ -359,6 +363,8 @@ fn resolve_playback(
             event_tx.clone(),
             track_id,
             title,
+            selected_track.reference.provider,
+            selected_track.collection_id.clone(),
             cache_monitor,
             DownloadPurpose::PlaybackPrefetch,
         );
@@ -395,6 +401,8 @@ fn spawn_download_monitor(
     event_tx: Sender<TransferEvent>,
     track_id: String,
     title: String,
+    provider: crate::provider::ProviderId,
+    collection_id: Option<String>,
     progress: ProgressiveDownload,
     purpose: DownloadPurpose,
 ) {
@@ -405,6 +413,8 @@ fn spawn_download_monitor(
                 Ok(()) => TransferEvent::DownloadCompleted {
                     track_id,
                     title,
+                    provider,
+                    collection_id,
                     purpose,
                 },
                 Err(error) if error.is_cancelled() => TransferEvent::DownloadCancelled { track_id },

@@ -871,10 +871,7 @@ impl OryxApp {
                     .flex()
                     .items_center()
                     .gap(px(theme::SPACE_3))
-                    .child(render_collection_artwork(
-                        track_list.collection.artwork_url.clone(),
-                        108.,
-                    ))
+                    .child(render_track_list_artwork(track_list, 108.))
                     .child(
                         div()
                             .flex_1()

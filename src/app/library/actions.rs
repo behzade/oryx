@@ -234,6 +234,17 @@ impl OryxApp {
             .update(cx, |catalog, _cx| catalog.refresh());
     }
 
+    pub(in crate::app) fn refresh_local_album_collection(
+        &mut self,
+        provider: ProviderId,
+        collection_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.library_catalog.update(cx, |catalog, _cx| {
+            catalog.refresh_album_collection(provider, collection_id);
+        });
+    }
+
     pub(in crate::app) fn delete_local_album_from_library(
         &mut self,
         provider: ProviderId,
@@ -244,6 +255,7 @@ impl OryxApp {
         self.close_context_menu(cx);
         self.clear_visible_local_track_list_override();
         let library = self.library.clone();
+        let delete_collection_id = collection_id.clone();
         self.status_message = Some(format!("Removing '{title}' from library..."));
         cx.notify();
 
@@ -251,14 +263,16 @@ impl OryxApp {
             let result = cx
                 .background_executor()
                 .spawn(
-                    async move { library.delete_collection_from_library(provider, &collection_id) },
+                    async move {
+                        library.delete_collection_from_library(provider, &delete_collection_id)
+                    },
                 )
                 .await;
 
             let _ = this.update(cx, move |this, cx| {
                 match result {
                     Ok(deleted_rows) => {
-                        this.refresh_local_library_views(cx);
+                        this.refresh_local_album_collection(provider, &collection_id, cx);
                         this.persist_session_snapshot(cx);
                         let message = if deleted_rows == 0 {
                             format!("No cached tracks found for '{title}'.")
@@ -290,6 +304,21 @@ impl OryxApp {
         self.close_context_menu(cx);
         let browse_mode = self.browse_mode;
         let visible_track_list_before_delete = self.current_visible_track_list_cloned(cx);
+        let affected_collection = visible_track_list_before_delete
+            .as_ref()
+            .and_then(|track_list| {
+                track_list
+                    .tracks
+                    .iter()
+                    .find(|track| {
+                        track.reference.provider == provider && track.reference.id == track_id
+                    })
+                    .and_then(|track| {
+                        track.collection_id
+                            .clone()
+                            .map(|collection_id| (track.reference.provider, collection_id))
+                    })
+            });
         let library = self.library.clone();
         self.status_message = Some(format!("Removing '{title}' from library..."));
         cx.notify();
@@ -304,7 +333,17 @@ impl OryxApp {
             let _ = this.update(cx, move |this, cx| {
                 match result {
                     Ok(deleted) => {
-                        this.refresh_local_library_views(cx);
+                        if let Some((collection_provider, collection_id)) =
+                            affected_collection.as_ref()
+                        {
+                            this.refresh_local_album_collection(
+                                *collection_provider,
+                                collection_id,
+                                cx,
+                            );
+                        } else {
+                            this.refresh_local_library_views(cx);
+                        }
                         if should_preserve_visible_track_list_after_delete(
                             browse_mode,
                             visible_track_list_before_delete.as_ref(),

@@ -478,7 +478,6 @@ impl OryxApp {
     }
 
     fn set_browse_mode(&mut self, mode: BrowseMode, cx: &mut Context<Self>) {
-        self.refresh_local_library_views(cx);
         self.browse_mode = mode;
         self.clear_visible_local_track_list_override();
         self.discover.update(cx, |discover, _cx| {
