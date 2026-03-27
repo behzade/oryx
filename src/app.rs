@@ -34,6 +34,7 @@ use crate::provider::{
 };
 use crate::theme;
 use crate::transfer::TransferManager;
+use crate::url_media::initialize_media_url_resolver;
 use serde::{Deserialize, Serialize};
 use souvlaki::MediaControlEvent;
 
@@ -250,6 +251,7 @@ impl OryxApp {
         shutdown_rx: Option<Arc<Mutex<Receiver<()>>>>,
         cx: &mut Context<Self>,
     ) -> Self {
+        initialize_media_url_resolver();
         let library = Library::new().expect("oryx library should initialize");
         let registry = ProviderRegistry::with_defaults(Some(&library));
         let providers = registry.all().to_vec();

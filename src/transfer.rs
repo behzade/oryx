@@ -13,7 +13,8 @@ use crate::model::Track;
 use crate::progressive::ProgressiveDownload;
 use crate::provider::{SharedProvider, TrackSummary};
 use crate::url_media::{
-    download_video_to_path, fallback_title_for_url, next_download_destination, resolve_video_url,
+    MediaResolveMethod, direct_link_fallback_download_error, download_video_to_path,
+    fallback_title_for_url, next_download_destination, resolve_video_url,
 };
 
 #[derive(Clone)]
@@ -247,6 +248,8 @@ impl TransferManager {
                 let result = (|| -> anyhow::Result<()> {
                     progress.wait_if_paused()?;
                     let resolved = resolve_video_url(&source_url)?;
+                    let used_direct_link_fallback =
+                        matches!(resolved.resolve_method, MediaResolveMethod::DirectUrl);
                     if let Some(title) = resolved.title.clone() {
                         resolved_title = title;
                     }
@@ -269,7 +272,14 @@ impl TransferManager {
                         &resolved.download_request,
                         &resolved_destination,
                         Some(&progress),
-                    )?;
+                    )
+                    .map_err(|error| {
+                        if used_direct_link_fallback {
+                            anyhow::anyhow!(direct_link_fallback_download_error(&error))
+                        } else {
+                            error
+                        }
+                    })?;
                     Ok(())
                 })();
 

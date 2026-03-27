@@ -7,8 +7,8 @@ use gpui::{
 
 use crate::theme;
 
-const DEFAULT_NOTIFICATION_DURATION: Duration = Duration::from_millis(2600);
-const ERROR_NOTIFICATION_DURATION: Duration = Duration::from_millis(4200);
+const DEFAULT_NOTIFICATION_DURATION: Duration = Duration::from_millis(3400);
+const ERROR_NOTIFICATION_DURATION: Duration = Duration::from_millis(5600);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum NotificationLevel {

@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
@@ -22,6 +24,17 @@ pub(crate) struct ResolvedVideoRequest {
     pub(crate) extension: Option<String>,
     pub(crate) duration_seconds: Option<u64>,
     pub(crate) download_request: DownloadRequest,
+    pub(crate) resolve_method: MediaResolveMethod,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaResolveMethod {
+    YtDlp,
+    DirectUrl,
+}
+
+pub(crate) fn initialize_media_url_resolver() {
+    let _ = yt_dlp_binary();
 }
 
 pub(crate) fn validate_open_url_input(url: &str) -> Result<Url> {
@@ -37,8 +50,11 @@ pub(crate) fn validate_open_url_input(url: &str) -> Result<Url> {
 }
 
 pub(crate) fn resolve_video_url(url: &str) -> Result<ResolvedVideoRequest> {
-    let _ = validate_open_url_input(url)?;
-    let output = Command::new(preferred_binary("yt-dlp", &["/opt/homebrew/bin/yt-dlp"]))
+    let parsed = validate_open_url_input(url)?;
+    let Some(binary) = yt_dlp_binary() else {
+        return Ok(build_direct_video_request(parsed));
+    };
+    let output = Command::new(binary)
         .arg("--dump-single-json")
         .arg("--no-warnings")
         .arg("--no-playlist")
@@ -88,7 +104,34 @@ pub(crate) fn resolve_video_url(url: &str) -> Result<ResolvedVideoRequest> {
                 .map(str::to_string),
             supports_byte_ranges,
         },
+        resolve_method: MediaResolveMethod::YtDlp,
     })
+}
+
+fn build_direct_video_request(parsed: Url) -> ResolvedVideoRequest {
+    let source_url = parsed.to_string();
+    let extension = extension_from_url(&source_url).map(str::to_string);
+    ResolvedVideoRequest {
+        title: None,
+        extension: extension.clone(),
+        duration_seconds: None,
+        download_request: DownloadRequest {
+            url: source_url.clone(),
+            headers: Vec::new(),
+            mime_type: extension
+                .as_deref()
+                .and_then(mime_type_from_extension)
+                .map(str::to_string),
+            supports_byte_ranges: !is_hls_playlist_url(&source_url),
+        },
+        resolve_method: MediaResolveMethod::DirectUrl,
+    }
+}
+
+pub(crate) fn direct_link_fallback_download_error(error: &anyhow::Error) -> String {
+    format!(
+        "{error:#}. Direct-link mode was used because yt-dlp is not available; for more robust URL handling, install yt-dlp on this system."
+    )
 }
 
 pub(crate) fn next_download_destination(
@@ -779,12 +822,91 @@ fn downloaded_file_len(path: &Path) -> Result<u64> {
         .len())
 }
 
-fn preferred_binary<'a>(fallback: &'a str, candidates: &[&'a str]) -> &'a str {
+fn yt_dlp_binary() -> Option<&'static PathBuf> {
+    static YT_DLP_BINARY: OnceLock<Option<PathBuf>> = OnceLock::new();
+    YT_DLP_BINARY.get_or_init(resolve_yt_dlp_binary).as_ref()
+}
+
+fn resolve_yt_dlp_binary() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(PathBuf::from("/opt/homebrew/bin/yt-dlp"));
+        candidates.push(PathBuf::from("/usr/local/bin/yt-dlp"));
+    }
+
     candidates
-        .iter()
-        .copied()
-        .find(|candidate| Path::new(candidate).is_file())
-        .unwrap_or(fallback)
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .or_else(|| {
+            find_binary_in_path("yt-dlp").or_else(|| {
+                #[cfg(target_os = "windows")]
+                {
+                    find_binary_in_path("yt-dlp.exe")
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    None
+                }
+            })
+        })
+}
+
+fn find_binary_in_path(name: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    let path_exts = path_extensions();
+
+    env::split_paths(&path).find_map(|directory| {
+        candidate_binary_names(name, &path_exts)
+            .into_iter()
+            .find_map(|candidate| {
+                let path = directory.join(candidate);
+                path.is_file().then_some(path)
+            })
+    })
+}
+
+fn path_extensions() -> Vec<String> {
+    #[cfg(target_os = "windows")]
+    {
+        env::var_os("PATHEXT")
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|extension| !extension.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|exts| !exts.is_empty())
+            .unwrap_or_else(|| vec![".COM".to_string(), ".EXE".to_string(), ".BAT".to_string()])
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
+    }
+}
+
+fn candidate_binary_names(name: &str, path_exts: &[String]) -> Vec<String> {
+    #[cfg(target_os = "windows")]
+    {
+        if Path::new(name).extension().is_some() {
+            return vec![name.to_string()];
+        }
+        let mut candidates = vec![name.to_string()];
+        candidates.extend(
+            path_exts
+                .iter()
+                .map(|extension| format!("{name}{extension}")),
+        );
+        candidates
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path_exts;
+        vec![name.to_string()]
+    }
 }
 
 #[cfg(test)]
@@ -838,6 +960,28 @@ mod tests {
 
         let _ = fs::remove_file(&existing);
         let _ = fs::remove_dir(&downloads_dir);
+    }
+
+    #[test]
+    fn build_direct_video_request_uses_source_url_without_headers() {
+        let request =
+            build_direct_video_request(Url::parse("https://example.com/video.mp4").unwrap());
+
+        assert_eq!(
+            request.download_request.url,
+            "https://example.com/video.mp4"
+        );
+        assert!(request.download_request.headers.is_empty());
+        assert_eq!(request.extension.as_deref(), Some("mp4"));
+        assert_eq!(request.resolve_method, MediaResolveMethod::DirectUrl);
+    }
+
+    #[test]
+    fn direct_link_fallback_error_mentions_yt_dlp_hint() {
+        let message = direct_link_fallback_download_error(&anyhow::anyhow!("timed out"));
+
+        assert!(message.contains("Direct-link mode was used because yt-dlp is not available"));
+        assert!(message.contains("install yt-dlp"));
     }
 
     #[test]
