@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::audio::PlaybackSource;
 use crate::library::{Library, PreparedPlaybackTrack};
@@ -452,7 +452,14 @@ static NOOP_WAKER_VTABLE: RawWakerVTable =
 
 fn next_external_download_id() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    format!("external-url:{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
+    let unique_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    format!(
+        "external-url:{unique_epoch}:{}",
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 #[cfg(test)]
@@ -562,5 +569,15 @@ mod tests {
         }
 
         fs::remove_dir_all(&root).expect("temp dir should be removed");
+    }
+
+    #[test]
+    fn external_download_ids_are_unique() {
+        let first = next_external_download_id();
+        let second = next_external_download_id();
+
+        assert_ne!(first, second);
+        assert!(first.starts_with("external-url:"));
+        assert!(second.starts_with("external-url:"));
     }
 }

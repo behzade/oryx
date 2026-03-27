@@ -1,6 +1,6 @@
 use gpui::{
-    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Styled, Window,
-    div, px, rgb, rgba,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb, rgba,
 };
 
 use crate::theme;
@@ -75,14 +75,27 @@ pub(in crate::app) fn render_modal_card_sized(
         .child(content)
 }
 
-pub(in crate::app) fn render_modal_body(content: impl IntoElement) -> gpui::Div {
-    div()
+pub(in crate::app) fn render_modal_body(content: impl IntoElement, scrollable: bool) -> gpui::Div {
+    let body = div()
         .w_full()
         .flex_1()
         .min_h_0()
         .p(px(theme::SPACE_4))
         .flex()
         .flex_col()
-        .gap(px(theme::SPACE_3))
-        .child(content)
+        .gap(px(theme::SPACE_3));
+
+    if scrollable {
+        body.child(
+            div()
+                .w_full()
+                .flex_1()
+                .min_h_0()
+                .id("modal-body-scroll")
+                .overflow_y_scroll()
+                .child(content),
+        )
+    } else {
+        body.child(content)
+    }
 }

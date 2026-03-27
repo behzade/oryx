@@ -772,6 +772,7 @@ pub(super) enum AppIcon {
     Heart,
     HeartFilled,
     Download,
+    Plus,
     Trash,
     X,
 }
@@ -793,6 +794,7 @@ impl AppIcon {
             Self::Heart => "icons/lucide/heart.svg",
             Self::HeartFilled => "icons/lucide/heart-filled.svg",
             Self::Download => "icons/lucide/download.svg",
+            Self::Plus => "icons/lucide/plus.svg",
             Self::Trash => "icons/lucide/trash-2.svg",
             Self::X => "icons/lucide/x.svg",
         }

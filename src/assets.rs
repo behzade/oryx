@@ -29,6 +29,7 @@ impl AssetSource for EmbeddedAssetSource {
                 "pause.svg".into(),
                 "play.svg".into(),
                 "play-circle.svg".into(),
+                "plus.svg".into(),
                 "repeat-1.svg".into(),
                 "repeat-2.svg".into(),
                 "search.svg".into(),
@@ -52,6 +53,7 @@ fn embedded_asset(path: &str) -> Option<&'static [u8]> {
         "icons/lucide/play-circle.svg" => {
             Some(include_bytes!("../assets/icons/lucide/play-circle.svg"))
         }
+        "icons/lucide/plus.svg" => Some(include_bytes!("../assets/icons/lucide/plus.svg")),
         "icons/lucide/pause.svg" => Some(include_bytes!("../assets/icons/lucide/pause.svg")),
         "icons/lucide/skip-back.svg" => {
             Some(include_bytes!("../assets/icons/lucide/skip-back.svg"))

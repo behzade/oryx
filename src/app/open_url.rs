@@ -130,7 +130,10 @@ impl OryxApp {
         self.transfer
             .queue_external_url_download(normalized_url.clone());
         self.open_url_input.reset(String::new());
-        self.update_ui_state(cx, |state| state.reset_open_url_prompt());
+        self.update_ui_state(cx, |state| {
+            state.reset_open_url_prompt();
+            state.open_downloads_modal();
+        });
         self.status_message = Some(format!("Queued '{}' for download.", normalized_url));
         cx.notify();
     }
@@ -351,6 +354,7 @@ impl OryxApp {
                                     .child("Add To Downloads".to_string()),
                             ),
                     ),
+                false,
             ),
         ))
         .on_mouse_down(

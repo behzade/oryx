@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Context, FontWeight, MouseButton, MouseDownEvent, ParentElement,
-    StatefulInteractiveElement, Styled, Window, div, px, relative, rgb,
+    App, Context, FontWeight, MouseButton, MouseDownEvent, ParentElement, Styled, Window, div, px,
+    relative, rgb,
 };
 
 use crate::library::{
@@ -138,6 +138,21 @@ fn download_icon_button(icon: AppIcon, style: DownloadActionStyle, disabled: boo
         .child(render_icon_with_color(icon, 15., style.icon))
 }
 
+fn chrome_icon_button(icon: AppIcon) -> gpui::Div {
+    div()
+        .px(px(theme::SPACE_2))
+        .py(px(theme::SPACE_2))
+        .rounded(px(10.))
+        .border_1()
+        .border_color(rgb(theme::BORDER_SUBTLE))
+        .bg(rgb(theme::SURFACE_FLOATING))
+        .cursor_pointer()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(render_icon_with_color(icon, 16., theme::TEXT_MUTED))
+}
+
 fn neutral_download_action_style() -> DownloadActionStyle {
     DownloadActionStyle {
         icon: theme::TEXT_MUTED,
@@ -261,6 +276,24 @@ fn download_duration_label(state: &DownloadItemState) -> Option<String> {
     }
 }
 
+fn download_speed_label(
+    state: &DownloadItemState,
+    snapshot: Option<ProgressiveSnapshot>,
+) -> Option<String> {
+    let DownloadItemState::Active { started_at, .. } = state else {
+        return None;
+    };
+    let snapshot = snapshot?;
+    if snapshot.paused || snapshot.complete || snapshot.downloaded_bytes == 0 {
+        return None;
+    }
+
+    let elapsed_seconds = started_at.elapsed().as_secs_f64().max(1.0);
+    let speed_bytes_per_second = (snapshot.downloaded_bytes as f64 / elapsed_seconds).round();
+    (speed_bytes_per_second > 0.0)
+        .then(|| format!("{}/s", format_byte_size(speed_bytes_per_second as u64)))
+}
+
 fn download_metadata_line(
     state: &DownloadItemState,
     snapshot: Option<ProgressiveSnapshot>,
@@ -271,6 +304,9 @@ fn download_metadata_line(
     }
     if let Some(size) = download_size_label(state, snapshot) {
         parts.push(size);
+    }
+    if let Some(speed) = download_speed_label(state, snapshot) {
+        parts.push(speed);
     }
     if let Some(duration) = download_duration_label(state) {
         parts.push(duration);
@@ -687,6 +723,7 @@ impl OryxApp {
                                     }),
                             ),
                     ),
+                false,
             ),
         ))
         .on_mouse_down(
@@ -889,6 +926,7 @@ impl OryxApp {
                                     .child(submit_label.to_string()),
                             ),
                     ),
+                false,
             ),
         ))
         .on_mouse_down(
@@ -912,47 +950,83 @@ impl OryxApp {
                 .gap(px(theme::SPACE_2))
                 .child(
                     div()
-                        .text_size(px(20.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(theme::TEXT_PRIMARY))
-                        .child("Downloads".to_string()),
-                )
-                .child(
-                    div()
-                        .text_size(px(theme::META_SIZE))
-                        .text_color(rgb(theme::TEXT_MUTED))
+                        .flex()
+                        .justify_between()
+                        .items_start()
+                        .gap(px(theme::SPACE_3))
                         .child(
-                            "No downloads yet. Track downloads and external URL downloads will show up here."
-                                .to_string(),
-                        ),
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(theme::SPACE_2))
+                                .child(
+                                    div()
+                                        .text_size(px(20.))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(rgb(theme::TEXT_PRIMARY))
+                                        .child("Downloads".to_string()),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(theme::META_SIZE))
+                                        .text_color(rgb(theme::TEXT_MUTED))
+                                        .child(
+                                            "No downloads yet. Track downloads and external URL downloads will show up here."
+                                                .to_string(),
+                                        ),
+                                ),
+                        )
+                        .child(chrome_icon_button(AppIcon::Plus).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                                this.open_url_prompt(window, cx);
+                            }),
+                        )),
                 )
         } else {
             let mut column = div().flex().flex_col().gap(px(theme::SPACE_3)).child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(4.))
+                    .justify_between()
+                    .items_start()
+                    .gap(px(theme::SPACE_3))
                     .child(
                         div()
-                            .text_size(px(20.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(theme::TEXT_PRIMARY))
-                            .child("Downloads".to_string()),
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .child(
+                                div()
+                                    .text_size(px(20.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme::TEXT_PRIMARY))
+                                    .child("Downloads".to_string()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(theme::META_SIZE))
+                                    .text_color(rgb(theme::TEXT_MUTED))
+                                    .child(if active_download_count == 0 {
+                                        format!("{} saved item(s)", downloads.len())
+                                    } else {
+                                        format!(
+                                            "{} active transfer(s), {} total item(s)",
+                                            active_download_count,
+                                            downloads.len()
+                                        )
+                                    }),
+                            ),
                     )
-                    .child(
-                        div()
-                            .text_size(px(theme::META_SIZE))
-                            .text_color(rgb(theme::TEXT_MUTED))
-                            .child(if active_download_count == 0 {
-                                format!("{} saved item(s)", downloads.len())
-                            } else {
-                                format!(
-                                    "{} active transfer(s), {} total item(s)",
-                                    active_download_count,
-                                    downloads.len()
-                                )
-                            }),
-                    ),
+                    .child(chrome_icon_button(AppIcon::Plus).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                            this.open_url_prompt(window, cx);
+                        }),
+                    )),
             );
 
             for download in downloads {
@@ -1269,25 +1343,31 @@ impl OryxApp {
         ui::render_modal_overlay(ui::render_modal_card(
             ui::ModalWidth::Medium,
             ui::render_modal_body(
-                body.child(
-                    div().flex().justify_end().child(
-                        div()
-                            .px(px(theme::SPACE_3))
-                            .py(px(theme::SPACE_2))
-                            .rounded(px(10.))
-                            .cursor_pointer()
-                            .bg(rgb(theme::SURFACE_BASE))
-                            .text_size(px(theme::META_SIZE))
-                            .text_color(rgb(theme::TEXT_MUTED))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
-                                    this.close_downloads_modal(cx);
-                                }),
-                            )
-                            .child("Close".to_string()),
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(theme::SPACE_3))
+                    .child(body)
+                    .child(
+                        div().flex().justify_end().child(
+                            div()
+                                .px(px(theme::SPACE_3))
+                                .py(px(theme::SPACE_2))
+                                .rounded(px(10.))
+                                .cursor_pointer()
+                                .bg(rgb(theme::SURFACE_BASE))
+                                .text_size(px(theme::META_SIZE))
+                                .text_color(rgb(theme::TEXT_MUTED))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                                        this.close_downloads_modal(cx);
+                                    }),
+                                )
+                                .child("Close".to_string()),
+                        ),
                     ),
-                ),
+                true,
             ),
         ))
         .on_mouse_down(
@@ -1339,11 +1419,6 @@ impl OryxApp {
         let unresolved_tracks = review.unresolved_track_count();
         let skipped_tracks = review.skipped_track_count();
         let mut body = div()
-            .w_full()
-            .flex_1()
-            .min_h_0()
-            .id("import-review-scroll")
-            .overflow_y_scroll()
             .flex()
             .flex_col()
             .gap(px(theme::SPACE_3))
@@ -1411,7 +1486,7 @@ impl OryxApp {
             ui::ModalWidth::Wide,
             modal_max_width,
             modal_max_height,
-            ui::render_modal_body(body),
+            ui::render_modal_body(body, true),
         ))
         .on_mouse_down(
             MouseButton::Left,
@@ -1444,6 +1519,7 @@ impl OryxApp {
                             .text_color(rgb(theme::TEXT_MUTED))
                             .child("Preparing the import review…".to_string()),
                     ),
+                false,
             ),
         ))
     }

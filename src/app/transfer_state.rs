@@ -9,7 +9,7 @@ use crate::progressive::ProgressiveDownload;
 use crate::provider::TrackSummary;
 use crate::transfer::{DownloadPurpose, TransferEvent};
 
-const EXTERNAL_DOWNLOAD_HISTORY_LIMIT: usize = 24;
+const EXTERNAL_DOWNLOAD_HISTORY_LIMIT: usize = 200;
 
 #[allow(dead_code)]
 #[derive(Clone)]
@@ -18,6 +18,7 @@ pub(super) struct ActiveTransfer {
     pub(super) title: String,
     pub(super) purpose: DownloadPurpose,
     pub(super) progress: ProgressiveDownload,
+    pub(super) started_at: Instant,
 }
 
 #[derive(Clone)]
@@ -91,6 +92,7 @@ impl TransferStateModel {
                 title,
                 purpose,
                 progress,
+                started_at: Instant::now(),
             },
         );
     }
@@ -128,37 +130,35 @@ impl TransferStateModel {
     }
 
     pub(super) fn download_items(&self) -> Vec<DownloadItem> {
-        let mut items = self
-            .external_downloads
-            .iter()
-            .cloned()
-            .map(ExternalDownloadItem::into_download_item)
+        let mut items = self.downloads.values().cloned().collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            right
+                .started_at
+                .cmp(&left.started_at)
+                .then_with(|| left.title.cmp(&right.title))
+        });
+        let mut items = items
+            .into_iter()
+            .map(|download| DownloadItem {
+                id: download.track_id.clone(),
+                title: download.title,
+                purpose: download.purpose,
+                state: DownloadItemState::Active {
+                    progress: download.progress,
+                    source_url: None,
+                    destination: None,
+                    started_at: download.started_at,
+                    duration_seconds: None,
+                },
+            })
             .collect::<Vec<_>>();
 
         items.extend(
-            self.downloads
-                .values()
+            self.external_downloads
+                .iter()
                 .cloned()
-                .map(|download| DownloadItem {
-                    id: download.track_id.clone(),
-                    title: download.title,
-                    purpose: download.purpose,
-                    state: DownloadItemState::Active {
-                        progress: download.progress,
-                        source_url: None,
-                        destination: None,
-                        started_at: Instant::now(),
-                        duration_seconds: None,
-                    },
-                }),
+                .map(ExternalDownloadItem::into_download_item),
         );
-
-        items.sort_by(|left, right| {
-            right
-                .is_active()
-                .cmp(&left.is_active())
-                .then_with(|| left.title.cmp(&right.title))
-        });
         items
     }
 
