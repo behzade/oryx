@@ -90,3 +90,9 @@ cargo packager --release --formats <dmg|appimage|deb|nsis>
 ```
 
 Artifacts are written under `target/release`.
+
+Create a release commit and git tag locally:
+
+```bash
+./scripts/release.sh <major|minor|patch>
+```
