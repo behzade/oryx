@@ -959,10 +959,12 @@ impl OryxApp {
                 let download_id = download.id.clone();
                 let cancel_download_id = download_id.clone();
                 let pause_download_id = download_id.clone();
-                let snapshot = match &download.state {
+                let (snapshot, is_retrying) = match &download.state {
                     DownloadItemState::Queued { progress, .. }
-                    | DownloadItemState::Active { progress, .. } => Some(progress.snapshot()),
-                    _ => None,
+                    | DownloadItemState::Active { progress, .. } => {
+                        (Some(progress.snapshot()), progress.is_retrying())
+                    }
+                    _ => (None, false),
                 };
                 let download_title = download_filename(&download.state)
                     .filter(|filename| !filename.trim().is_empty())
@@ -1002,7 +1004,16 @@ impl OryxApp {
                         .map(|path| path.display().to_string())
                         .unwrap_or_else(|| error.clone()),
                 };
-                let metadata_line = download_metadata_line(&download.state, snapshot);
+                let metadata_line = download_metadata_line(&download.state, snapshot).map(|line| {
+                    if is_retrying {
+                        format!("Retrying after a network interruption  |  {line}")
+                    } else {
+                        line
+                    }
+                });
+                let metadata_line = metadata_line.or_else(|| {
+                    is_retrying.then(|| "Retrying after a network interruption".to_string())
+                });
                 let stream_action = match (&download.state, snapshot, download.purpose) {
                     (
                         DownloadItemState::Active {

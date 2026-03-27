@@ -14,7 +14,6 @@ use crate::pathing::sanitize_path_component;
 use crate::progressive::ProgressiveDownload;
 use crate::provider::{DownloadRequest, HttpHeader, network_agent};
 
-const DOWNLOAD_RETRY_LIMIT: usize = 4;
 const DOWNLOAD_RETRY_BASE_DELAY_MS: u64 = 750;
 
 #[derive(Clone)]
@@ -142,7 +141,7 @@ pub(crate) fn download_video_to_path(
         request,
         destination,
         progress,
-        DownloadRetryPolicy::Bounded(DOWNLOAD_RETRY_LIMIT),
+        DownloadRetryPolicy::Infinite,
     )?;
 
     if let Some(progress) = progress {
@@ -333,7 +332,7 @@ fn mime_type_from_extension(extension: &str) -> Option<&'static str> {
 
 #[derive(Clone, Copy, Debug)]
 enum DownloadRetryPolicy {
-    Bounded(usize),
+    Infinite,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -367,7 +366,14 @@ fn download_to_partial_path(
         } else {
             let existing_len = resumable_download_len(destination, request.supports_byte_ranges)?;
             download_attempt(request, destination, progress, existing_len)
-        };
+        }
+        .with_context(|| {
+            format!(
+                "Failed to download {} (attempt {})",
+                request.url,
+                attempt + 1
+            )
+        });
 
         match attempt_result {
             Ok(result) => return Ok(result),
@@ -379,7 +385,16 @@ fn download_to_partial_path(
                 if let Some(progress) = progress {
                     progress.set_retrying(true);
                 }
-                std::thread::sleep(download_retry_delay(attempt));
+                let delay = download_retry_delay(attempt);
+                if should_log_download_retry(attempt) {
+                    eprintln!(
+                        "external download attempt {} failed for '{}': {error:#}; retrying in {}ms",
+                        attempt + 1,
+                        request.url,
+                        delay.as_millis()
+                    );
+                }
+                std::thread::sleep(delay);
                 attempt += 1;
             }
             Err(error) => return Err(error),
@@ -725,12 +740,17 @@ fn is_retryable_download_error_message(message: &dyn std::fmt::Display) -> bool 
     [
         "timed out",
         "timeout",
+        "dns failed",
+        "failed to lookup address information",
         "connection reset",
         "connection aborted",
         "broken pipe",
         "unexpected eof",
         "temporarily unavailable",
         "network is unreachable",
+        "temporary failure in name resolution",
+        "name or service not known",
+        "nodename nor servname provided",
         "connection closed before message completed",
     ]
     .iter()
@@ -742,11 +762,14 @@ fn download_retry_delay(attempt: usize) -> Duration {
     Duration::from_millis(DOWNLOAD_RETRY_BASE_DELAY_MS.saturating_mul(1u64 << exponent))
 }
 
+fn should_log_download_retry(attempt: usize) -> bool {
+    attempt < 2 || (attempt + 1).is_multiple_of(10)
+}
+
 impl DownloadRetryPolicy {
     fn allows_retry(self, attempt: usize) -> bool {
-        match self {
-            Self::Bounded(limit) => attempt < limit,
-        }
+        let _ = attempt;
+        matches!(self, Self::Infinite)
     }
 }
 
@@ -843,5 +866,21 @@ mod tests {
 
         let _ = fs::remove_file(&existing);
         let _ = fs::remove_dir(&downloads_dir);
+    }
+
+    #[test]
+    fn infinite_retry_policy_always_allows_retry() {
+        assert!(DownloadRetryPolicy::Infinite.allows_retry(0));
+        assert!(DownloadRetryPolicy::Infinite.allows_retry(10));
+        assert!(DownloadRetryPolicy::Infinite.allows_retry(usize::MAX));
+    }
+
+    #[test]
+    fn classifies_dns_resolution_failures_as_retryable() {
+        let error = anyhow::anyhow!(
+            "Dns Failed: resolve dns name 'example.com:443': failed to lookup address information: nodename nor servname provided, or not known"
+        );
+
+        assert!(should_retry_partial_download(&error));
     }
 }

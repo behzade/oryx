@@ -1771,12 +1771,17 @@ fn is_retryable_download_error_message(message: &dyn std::fmt::Display) -> bool 
     [
         "timed out",
         "timeout",
+        "dns failed",
+        "failed to lookup address information",
         "connection reset",
         "connection aborted",
         "broken pipe",
         "unexpected eof",
         "temporarily unavailable",
         "network is unreachable",
+        "temporary failure in name resolution",
+        "name or service not known",
+        "nodename nor servname provided",
         "connection closed before message completed",
     ]
     .iter()
@@ -1944,9 +1949,13 @@ mod tests {
     #[test]
     fn classifies_transient_download_errors_as_retryable() {
         let error = anyhow::anyhow!("timed out reading response");
+        let dns_error = anyhow::anyhow!(
+            "Dns Failed: resolve dns name 'example.com:443': failed to lookup address information: nodename nor servname provided, or not known"
+        );
         let fatal = anyhow::anyhow!("404 Not Found");
 
         assert!(should_retry_partial_download(&error));
+        assert!(should_retry_partial_download(&dns_error));
         assert!(!should_retry_partial_download(&fatal));
     }
 
