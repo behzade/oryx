@@ -1,10 +1,11 @@
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use rodio::cpal::StreamError;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use souvlaki::{MediaControls, MediaPlayback, MediaPosition};
 
@@ -22,6 +23,8 @@ struct PlaybackBackend {
     stream_errors: Receiver<StreamError>,
     needs_rebuild: bool,
     current: Option<CurrentPlayback>,
+    last_default_output: Option<OutputDeviceSnapshot>,
+    route_changed_since_rebuild: bool,
 }
 
 #[derive(Clone)]
@@ -31,7 +34,14 @@ struct CurrentPlayback {
     playback: PlaybackState,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OutputDeviceSnapshot {
+    id: String,
+    description: String,
+}
+
 const TRACK_END_TOLERANCE: Duration = Duration::from_millis(250);
+const OUTPUT_ROUTE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) fn playback_worker(
     rx: Receiver<PlaybackCommand>,
     media_controls: Option<MediaControls>,
@@ -39,7 +49,18 @@ pub(super) fn playback_worker(
     let mut backend: Option<PlaybackBackend> = None;
     let mut media_controls = media_controls;
 
-    while let Ok(command) = rx.recv() {
+    loop {
+        let command = match rx.recv_timeout(OUTPUT_ROUTE_POLL_INTERVAL) {
+            Ok(command) => command,
+            Err(RecvTimeoutError::Timeout) => {
+                if let Some(backend) = backend.as_mut() {
+                    observe_output_route(backend);
+                }
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+
         match command {
             PlaybackCommand::Play {
                 track,
@@ -118,6 +139,20 @@ fn play_song(
     position: Option<Duration>,
 ) -> Result<()> {
     let backend = ensure_backend(backend, media_controls.take())?;
+    // macOS/CoreAudio route changes can leave a rodio/CPAL output stream silently stale without
+    // emitting StreamInvalidated/DeviceNotAvailable. In the reproduced Bluetooth cases:
+    // 1. The default output changed away from the headphones and sometimes back again.
+    // 2. CPAL often kept reporting the same logical device id after reconnect.
+    // 3. The existing sink/player kept advancing transport state but produced no audible output.
+    //
+    // Because the stream can be dead even when the current default device "matches" again, we
+    // cannot rely on sink-vs-default equality or on CPAL error callbacks alone. The reliable app-
+    // level signal we do have is that the OS output route changed at some point after the sink was
+    // built. When that happens, the next explicit playback action must rebuild the sink before it
+    // tries to use the stale stream.
+    if backend.route_changed_since_rebuild {
+        backend.needs_rebuild = true;
+    }
     rebuild_output_if_needed(backend)?;
 
     if let Some(current_player) = backend.player.take() {
@@ -181,6 +216,13 @@ fn resume_playback(
     let Some(backend) = backend.as_mut() else {
         return Ok(());
     };
+    if backend.route_changed_since_rebuild && backend.current.is_some() {
+        backend.needs_rebuild = true;
+    }
+    if debug_force_rebuild_on_resume_enabled() && backend.current.is_some() {
+        eprintln!("audio debug: forcing output rebuild on resume");
+        backend.needs_rebuild = true;
+    }
     rebuild_output_if_needed(backend)?;
 
     if backend.media_controls.is_none() {
@@ -221,6 +263,7 @@ fn stop_playback(
     backend.clock.stop();
     backend.current = None;
     backend.needs_rebuild = false;
+    backend.route_changed_since_rebuild = false;
     media::set_media_playback_state(&mut backend.media_controls, MediaPlayback::Stopped);
 
     Ok(())
@@ -231,7 +274,7 @@ fn ensure_backend(
     media_controls: Option<MediaControls>,
 ) -> Result<&mut PlaybackBackend> {
     if backend.is_none() {
-        let (mut sink, stream_errors) = open_output_sink()?;
+        let (mut sink, stream_errors, sink_output) = open_output_sink()?;
         sink.log_on_drop(false);
         *backend = Some(PlaybackBackend {
             sink,
@@ -241,6 +284,8 @@ fn ensure_backend(
             stream_errors,
             needs_rebuild: false,
             current: None,
+            last_default_output: sink_output,
+            route_changed_since_rebuild: false,
         });
     } else if let Some(media_controls) = media_controls {
         backend
@@ -269,6 +314,7 @@ fn runtime_status(backend: &mut Option<PlaybackBackend>) -> Result<PlaybackRunti
     };
     drain_stream_errors(backend);
     rebuild_output_if_needed(backend)?;
+    observe_output_route(backend);
 
     let Some(player) = backend.player.as_ref() else {
         return Ok(PlaybackRuntimeStatus {
@@ -326,6 +372,9 @@ fn seek_to_position(
     let Some(backend) = backend.as_mut() else {
         return Ok(());
     };
+    if backend.route_changed_since_rebuild && backend.current.is_some() {
+        backend.needs_rebuild = true;
+    }
     rebuild_output_if_needed(backend)?;
 
     if backend.media_controls.is_none() {
@@ -378,6 +427,9 @@ fn restart_current_playback(
     let Some(backend) = backend.as_mut() else {
         return Ok(());
     };
+    if backend.route_changed_since_rebuild && backend.current.is_some() {
+        backend.needs_rebuild = true;
+    }
     rebuild_output_if_needed(backend)?;
 
     if backend.media_controls.is_none() {
@@ -411,17 +463,22 @@ fn restart_current_playback(
     Ok(())
 }
 
-fn open_output_sink() -> Result<(MixerDeviceSink, Receiver<StreamError>)> {
+fn open_output_sink() -> Result<(
+    MixerDeviceSink,
+    Receiver<StreamError>,
+    Option<OutputDeviceSnapshot>,
+)> {
     let (error_tx, error_rx) = mpsc::channel();
     let error_callback = move |error| {
         let _ = error_tx.send(error);
     };
+    let sink_output = current_default_output_device();
     let sink = DeviceSinkBuilder::from_default_device()
         .context("Failed to resolve the default audio output")?
         .with_error_callback(error_callback)
         .open_sink_or_fallback()
         .context("Failed to open the default audio output")?;
-    Ok((sink, error_rx))
+    Ok((sink, error_rx, sink_output))
 }
 
 fn build_player(
@@ -507,7 +564,7 @@ fn rebuild_output_if_needed(backend: &mut PlaybackBackend) -> Result<()> {
     }
 
     let position = playback_position(backend).unwrap_or_default();
-    let (mut sink, stream_errors) = open_output_sink()?;
+    let (mut sink, stream_errors, sink_output) = open_output_sink()?;
     sink.log_on_drop(false);
     if let Some(player) = backend.player.take() {
         player.stop();
@@ -515,6 +572,8 @@ fn rebuild_output_if_needed(backend: &mut PlaybackBackend) -> Result<()> {
     backend.sink = sink;
     backend.stream_errors = stream_errors;
     backend.needs_rebuild = false;
+    backend.last_default_output = sink_output.clone();
+    backend.route_changed_since_rebuild = false;
 
     let Some(current) = backend.current.clone() else {
         return Ok(());
@@ -562,6 +621,37 @@ fn drain_stream_errors(backend: &mut PlaybackBackend) {
             }
         }
     }
+}
+
+fn observe_output_route(backend: &mut PlaybackBackend) {
+    let default_output = current_default_output_device();
+    if backend.last_default_output != default_output {
+        // This flag intentionally survives until the next sink rebuild. A route change that
+        // happens while "Playing" is just as dangerous as one that happens while "Paused": macOS
+        // may pause playback after the route flip, and by then the stream can already be stale.
+        // Requiring a rebuild only for paused-time changes misses that sequence.
+        backend.route_changed_since_rebuild = true;
+        backend.last_default_output = default_output.clone();
+    }
+}
+
+fn debug_force_rebuild_on_resume_enabled() -> bool {
+    std::env::var_os("ORYX_DEBUG_FORCE_REBUILD_ON_RESUME").is_some()
+}
+
+fn current_default_output_device() -> Option<OutputDeviceSnapshot> {
+    let host = rodio::cpal::default_host();
+    let device = host.default_output_device()?;
+    snapshot_output_device(&device)
+}
+
+fn snapshot_output_device(device: &rodio::cpal::Device) -> Option<OutputDeviceSnapshot> {
+    let id = device.id().ok()?.to_string();
+    let description = device
+        .description()
+        .map(|description| description.to_string())
+        .unwrap_or_else(|_| "unknown output device".to_string());
+    Some(OutputDeviceSnapshot { id, description })
 }
 
 fn playback_position(backend: &PlaybackBackend) -> Option<Duration> {
