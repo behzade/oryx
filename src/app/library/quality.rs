@@ -1,4 +1,6 @@
-use crate::provider::{AudioFormat, TrackSummary};
+use std::collections::HashSet;
+
+use crate::provider::{AudioFormat, TrackList, TrackSummary};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(in crate::app) struct AudioQuality {
@@ -23,12 +25,24 @@ impl AudioQualityGrade {
             Self::Low => "Low",
         }
     }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::Low => 0,
+            Self::Standard => 1,
+            Self::High => 2,
+            Self::Lossless => 3,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) enum CollectionQualitySummary {
     Uniform(AudioQualityGrade),
-    Mixed,
+    Range {
+        lowest: AudioQualityGrade,
+        highest: AudioQualityGrade,
+    },
 }
 
 pub(in crate::app) fn normalized_audio_quality(quality: &AudioQuality) -> Option<AudioQuality> {
@@ -101,14 +115,69 @@ pub(in crate::app) fn normalized_audio_quality_label(quality: &AudioQuality) -> 
     }
 }
 
-pub(in crate::app) fn audio_quality_from_track(track: &TrackSummary) -> Option<AudioQuality> {
-    if track.audio_format.is_none() && track.bitrate_bps.is_none() {
+pub(in crate::app) fn summarize_audio_quality_grades(
+    grades: impl IntoIterator<Item = AudioQualityGrade>,
+) -> Option<CollectionQualitySummary> {
+    let mut unique_grades = grades.into_iter().collect::<Vec<_>>();
+    if unique_grades.is_empty() {
+        return None;
+    }
+
+    unique_grades.sort_by_key(|grade| grade.rank());
+    unique_grades.dedup();
+
+    if unique_grades.len() == 1 {
+        return Some(CollectionQualitySummary::Uniform(unique_grades[0]));
+    }
+
+    Some(CollectionQualitySummary::Range {
+        lowest: *unique_grades
+            .first()
+            .expect("at least one grade should exist"),
+        highest: *unique_grades
+            .last()
+            .expect("at least one grade should exist"),
+    })
+}
+
+pub(in crate::app) fn summarize_track_list_quality(
+    track_list: &TrackList,
+) -> Option<CollectionQualitySummary> {
+    summarize_collection_quality(track_list.tracks.iter())
+}
+
+pub(in crate::app) fn summarize_collection_quality<'a>(
+    tracks: impl Iterator<Item = &'a TrackSummary>,
+) -> Option<CollectionQualitySummary> {
+    let mut qualities = HashSet::new();
+    for track in tracks {
+        if let Some(quality) = audio_quality_from_track_summary(track) {
+            if let Some(grade) = normalized_audio_quality_grade(&quality) {
+                qualities.insert(grade);
+            }
+        }
+    }
+
+    summarize_audio_quality_grades(qualities)
+}
+
+pub(in crate::app) fn audio_quality_from_track_summary(
+    track: &TrackSummary,
+) -> Option<AudioQuality> {
+    audio_quality_from_parts(track.audio_format.clone(), track.bitrate_bps)
+}
+
+fn audio_quality_from_parts(
+    audio_format: Option<AudioFormat>,
+    bitrate_bps: Option<u32>,
+) -> Option<AudioQuality> {
+    if audio_format.is_none() && bitrate_bps.is_none() {
         return None;
     }
 
     Some(AudioQuality {
-        audio_format: track.audio_format.clone(),
-        bitrate_bps: track.bitrate_bps,
+        audio_format,
+        bitrate_bps,
     })
 }
 

@@ -22,11 +22,13 @@ use crate::theme;
 use crate::url_media::fallback_download_name;
 
 use self::rows::{
-    action_button, audio_quality_from_track_summary, collection_quality_metadata,
-    download_progress_ratio, metadata_label, render_collection_artwork,
-    summarize_track_list_quality, vertical_divider,
+    action_button, collection_quality_metadata, download_progress_ratio, metadata_label,
+    render_collection_artwork, vertical_divider,
 };
-use super::library::{AudioQuality, CollectionQualitySummary, normalized_audio_quality_grade};
+use super::library::{
+    CollectionQualitySummary, audio_quality_from_track_summary, normalized_audio_quality_grade,
+    summarize_track_list_quality,
+};
 use super::text_input::{TextInputElement, TextInputId};
 use super::transfer_state::DownloadItemState;
 use super::ui::{self, ContextMenuState, ContextMenuTarget};
@@ -453,7 +455,7 @@ impl OryxApp {
             (Some(track_grade), Some(CollectionQualitySummary::Uniform(collection_quality))) => {
                 track_grade != *collection_quality
             }
-            (Some(_), Some(CollectionQualitySummary::Mixed)) => true,
+            (Some(_), Some(CollectionQualitySummary::Range { .. })) => true,
         };
 
         let quality = if show_quality {

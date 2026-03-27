@@ -7,17 +7,14 @@ use gpui::{
     img, px, relative, rgb, rgba,
 };
 
-use crate::app::library::AudioQualityGrade;
+use crate::app::library::{AudioQualityGrade, summarize_collection_quality};
 use crate::progressive::ProgressiveSnapshot;
 use crate::provider::{CollectionKind, ProviderId, TrackList, TrackSummary};
 use crate::theme;
 
-use super::{
-    AppIcon, AudioQuality, CollectionQualitySummary, normalized_audio_quality_grade,
-    render_icon_with_color,
-};
+use super::{AppIcon, CollectionQualitySummary, render_icon_with_color};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct QualityMetadata {
     pub(super) label: String,
     pub(super) color: u32,
@@ -429,47 +426,6 @@ pub(super) fn artist_album_metadata(
     metadata_label(provider, quality, provider != ProviderId::Local)
 }
 
-pub(super) fn summarize_track_list_quality(
-    track_list: &TrackList,
-) -> Option<CollectionQualitySummary> {
-    summarize_collection_quality(track_list.tracks.iter())
-}
-
-pub(super) fn summarize_collection_quality<'a>(
-    tracks: impl Iterator<Item = &'a TrackSummary>,
-) -> Option<CollectionQualitySummary> {
-    let mut qualities = HashSet::new();
-    for track in tracks {
-        if let Some(quality) = audio_quality_from_track_summary(track) {
-            if let Some(grade) = normalized_audio_quality_grade(&quality) {
-                qualities.insert(grade);
-            }
-        }
-    }
-
-    match qualities.len() {
-        0 => None,
-        1 => Some(CollectionQualitySummary::Uniform(
-            qualities
-                .into_iter()
-                .next()
-                .expect("single quality should exist"),
-        )),
-        _ => Some(CollectionQualitySummary::Mixed),
-    }
-}
-
-pub(super) fn audio_quality_from_track_summary(track: &TrackSummary) -> Option<AudioQuality> {
-    if track.audio_format.is_none() && track.bitrate_bps.is_none() {
-        return None;
-    }
-
-    Some(AudioQuality {
-        audio_format: track.audio_format.clone(),
-        bitrate_bps: track.bitrate_bps,
-    })
-}
-
 pub(super) fn metadata_label(
     provider: ProviderId,
     quality: Option<QualityMetadata>,
@@ -505,7 +461,15 @@ pub(super) fn collection_quality_metadata(
 ) -> Option<QualityMetadata> {
     match summary {
         CollectionQualitySummary::Uniform(quality) => Some(quality_metadata_for_grade(*quality)),
-        CollectionQualitySummary::Mixed => Some(QualityMetadata {
+        CollectionQualitySummary::Range { lowest, highest }
+            if *lowest == AudioQualityGrade::High && *highest == AudioQualityGrade::Lossless =>
+        {
+            Some(QualityMetadata {
+                label: "High / Lossless".to_string(),
+                color: theme::QUALITY_HIGH,
+            })
+        }
+        CollectionQualitySummary::Range { .. } => Some(QualityMetadata {
             label: "Mixed".to_string(),
             color: theme::TEXT_DIM,
         }),
@@ -861,12 +825,17 @@ pub(super) fn empty_state(message: &str) -> gpui::Div {
 #[cfg(test)]
 mod tests {
     use super::{
-        CollageTile, artist_album_collage_urls, artwork_collage_layout, sidebar_secondary_metadata,
+        CollageTile, artist_album_collage_urls, artwork_collage_layout,
+        collection_quality_metadata, sidebar_secondary_metadata,
+    };
+    use crate::app::library::{
+        AudioQualityGrade, CollectionQualitySummary, summarize_collection_quality,
     };
     use crate::provider::{
-        CollectionKind, CollectionRef, CollectionSummary, ProviderId, TrackList, TrackRef,
-        TrackSummary,
+        AudioFormat, CollectionKind, CollectionRef, CollectionSummary, ProviderId, TrackList,
+        TrackRef, TrackSummary,
     };
+    use crate::theme;
 
     #[test]
     fn artwork_collage_layout_uses_two_panel_split_for_two_images() {
@@ -976,11 +945,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn summarizes_high_and_lossless_collections_as_a_range() {
+        let track_list = TrackList {
+            collection: CollectionSummary {
+                reference: CollectionRef::new(
+                    ProviderId::Local,
+                    "album-a",
+                    CollectionKind::Album,
+                    None,
+                ),
+                title: "Album A".to_string(),
+                subtitle: Some("Artist One".to_string()),
+                artwork_url: None,
+                track_count: Some(2),
+            },
+            tracks: vec![
+                track_summary_with_quality(
+                    "track-1",
+                    Some("album-a"),
+                    Some("Album A"),
+                    Some(AudioFormat::Flac),
+                    None,
+                ),
+                track_summary_with_quality(
+                    "track-2",
+                    Some("album-a"),
+                    Some("Album A"),
+                    Some(AudioFormat::Mp3),
+                    Some(320_000),
+                ),
+            ],
+        };
+
+        assert_eq!(
+            summarize_collection_quality(track_list.tracks.iter()),
+            Some(CollectionQualitySummary::Range {
+                lowest: AudioQualityGrade::High,
+                highest: AudioQualityGrade::Lossless,
+            })
+        );
+    }
+
+    #[test]
+    fn quality_metadata_uses_explicit_label_for_high_and_lossless_ranges() {
+        assert_eq!(
+            collection_quality_metadata(&CollectionQualitySummary::Range {
+                lowest: AudioQualityGrade::High,
+                highest: AudioQualityGrade::Lossless,
+            }),
+            Some(super::QualityMetadata {
+                label: "High / Lossless".to_string(),
+                color: theme::QUALITY_HIGH,
+            })
+        );
+    }
+
     fn track_summary(
         id: &str,
         collection_id: Option<&str>,
         collection_title: Option<&str>,
         artwork_url: Option<&str>,
+    ) -> TrackSummary {
+        track_summary_with_quality(id, collection_id, collection_title, None, None)
+            .with_artwork(artwork_url)
+    }
+
+    fn track_summary_with_quality(
+        id: &str,
+        collection_id: Option<&str>,
+        collection_title: Option<&str>,
+        audio_format: Option<AudioFormat>,
+        bitrate_bps: Option<u32>,
     ) -> TrackSummary {
         TrackSummary {
             reference: TrackRef::new(ProviderId::Local, id, None, Some(id.to_string())),
@@ -991,9 +1027,20 @@ mod tests {
             collection_title: collection_title.map(str::to_string),
             collection_subtitle: Some("Artist One".to_string()),
             duration_seconds: None,
-            bitrate_bps: None,
-            audio_format: None,
-            artwork_url: artwork_url.map(str::to_string),
+            bitrate_bps,
+            audio_format,
+            artwork_url: None,
+        }
+    }
+
+    trait TrackSummaryTestExt {
+        fn with_artwork(self, artwork_url: Option<&str>) -> Self;
+    }
+
+    impl TrackSummaryTestExt for TrackSummary {
+        fn with_artwork(mut self, artwork_url: Option<&str>) -> Self {
+            self.artwork_url = artwork_url.map(str::to_string);
+            self
         }
     }
 }

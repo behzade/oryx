@@ -7,8 +7,8 @@ use crate::provider::{
 
 use super::super::track_cache_key;
 use super::quality::{
-    AudioQuality, AudioQualityGrade, CollectionQualitySummary, audio_quality_from_track,
-    normalized_audio_quality_grade,
+    AudioQuality, AudioQualityGrade, CollectionQualitySummary, audio_quality_from_track_summary,
+    normalized_audio_quality_grade, summarize_audio_quality_grades,
 };
 
 const SYSTEM_PLAYLIST_SUBTITLE: &str = "System playlist";
@@ -23,7 +23,7 @@ pub(in crate::app) fn build_cached_quality_maps(
     let mut collection_qualities = HashMap::<String, HashSet<AudioQualityGrade>>::new();
 
     for cached_track in tracks {
-        let Some(quality) = audio_quality_from_track(&cached_track.track) else {
+        let Some(quality) = audio_quality_from_track_summary(&cached_track.track) else {
             continue;
         };
 
@@ -46,16 +46,8 @@ pub(in crate::app) fn build_cached_quality_maps(
     let collection_summaries = collection_qualities
         .into_iter()
         .map(|(collection_key, qualities)| {
-            let summary = if qualities.len() <= 1 {
-                CollectionQualitySummary::Uniform(
-                    qualities
-                        .into_iter()
-                        .next()
-                        .expect("single quality should exist"),
-                )
-            } else {
-                CollectionQualitySummary::Mixed
-            };
+            let summary = summarize_audio_quality_grades(qualities)
+                .expect("collection with tracked qualities should yield a summary");
             (collection_key, summary)
         })
         .collect();

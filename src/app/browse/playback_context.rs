@@ -8,10 +8,11 @@ use gpui::{
 
 use crate::theme;
 
+use super::super::library::summarize_track_list_quality;
 use super::super::track_cache_key;
 use super::rows::{
     apply_previous_playing_row_style, empty_state, panel_body, render_collection_artwork,
-    render_row_metadata, summarize_track_list_quality,
+    render_row_metadata,
 };
 use super::{CollectionKindLabel, OryxApp, format_duration};
 

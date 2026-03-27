@@ -10,14 +10,14 @@ use crate::provider::{ProviderId, TrackList, TrackSummary};
 use crate::theme;
 use crate::transfer::DownloadPurpose;
 
+use super::super::library::{summarize_collection_quality, summarize_track_list_quality};
 use super::super::track_cache_key;
 use super::super::ui::ContextMenuTarget;
 use super::rows::{
     apply_previous_playing_row_style, artist_album_metadata, clickable_row, empty_state,
     panel_body, render_collection_artwork, render_download_progress_line, render_row_metadata,
     render_track_download_action, render_track_like_action, render_track_list_artwork, row_shell,
-    sidebar_primary_metadata, sidebar_secondary_metadata, summarize_collection_quality,
-    summarize_track_list_quality,
+    sidebar_primary_metadata, sidebar_secondary_metadata,
 };
 use super::{
     AppIcon, BrowseMode, CollectionKindLabel, OryxApp, format_duration,

@@ -41,3 +41,18 @@ fn grades_common_lossy_formats_with_codec_aware_thresholds() {
         Some(AudioQualityGrade::Standard)
     );
 }
+
+#[test]
+fn summarizes_high_and_lossless_as_a_range_instead_of_flat_mixed() {
+    assert_eq!(
+        summarize_audio_quality_grades([
+            AudioQualityGrade::Lossless,
+            AudioQualityGrade::High,
+            AudioQualityGrade::High,
+        ]),
+        Some(CollectionQualitySummary::Range {
+            lowest: AudioQualityGrade::High,
+            highest: AudioQualityGrade::Lossless,
+        })
+    );
+}
