@@ -67,20 +67,7 @@ impl LibraryModule {
             self.local_artists = build_local_artist_lists(&self.local_albums);
         }
 
-        if let Ok(mut playlists) = self.library.entity_playlist_track_lists() {
-            if let Ok(Some(recently_played)) = self.library.load_recently_played_playlist() {
-                let insert_index = playlists
-                    .iter()
-                    .position(|playlist| playlist.collection.reference.id == LIKED_PLAYLIST_ID)
-                    .map(|index| index + 1)
-                    .unwrap_or(0);
-                playlists.insert(insert_index, recently_played);
-            }
-            self.local_playlists = playlists
-                .into_iter()
-                .filter(|playlist| playlist.collection.reference.kind == CollectionKind::Playlist)
-                .collect();
-        }
+        self.refresh_playlists();
 
         if let Ok(cached_track_ids) = self.library.all_cached_track_ids() {
             self.cached_track_ids = cached_track_ids;
@@ -138,6 +125,12 @@ impl LibraryModule {
 
         self.upsert_local_album(updated_album, &collection);
         self.local_artists = build_local_artist_lists(&self.local_albums);
+        self.refresh_playlists();
+        self.reconcile_local_selections();
+    }
+
+    pub(in crate::app) fn refresh_playlists_only(&mut self) {
+        self.refresh_playlists();
         self.reconcile_local_selections();
     }
 
@@ -297,6 +290,23 @@ impl LibraryModule {
                             )
                     })
             });
+        }
+    }
+
+    fn refresh_playlists(&mut self) {
+        if let Ok(mut playlists) = self.library.entity_playlist_track_lists() {
+            if let Ok(Some(recently_played)) = self.library.load_recently_played_playlist() {
+                let insert_index = playlists
+                    .iter()
+                    .position(|playlist| playlist.collection.reference.id == LIKED_PLAYLIST_ID)
+                    .map(|index| index + 1)
+                    .unwrap_or(0);
+                playlists.insert(insert_index, recently_played);
+            }
+            self.local_playlists = playlists
+                .into_iter()
+                .filter(|playlist| playlist.collection.reference.kind == CollectionKind::Playlist)
+                .collect();
         }
     }
 

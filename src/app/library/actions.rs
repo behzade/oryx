@@ -245,6 +245,15 @@ impl OryxApp {
         });
     }
 
+    pub(in crate::app) fn refresh_local_playlists(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.library_catalog.update(cx, |catalog, _cx| {
+            catalog.refresh_playlists_only();
+        });
+    }
+
     pub(in crate::app) fn delete_local_album_from_library(
         &mut self,
         provider: ProviderId,

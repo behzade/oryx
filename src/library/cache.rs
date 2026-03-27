@@ -409,7 +409,10 @@ pub(super) fn cached_library_tracks_for_collection(
     provider: ProviderId,
     collection_id: &str,
 ) -> Result<Vec<CachedLibraryTrack>> {
-    let connection = library.open_connection()?;
+    let mut connection = library.open_connection()?;
+    prune_missing_cached_entries(&mut connection)?;
+    backfill_missing_cached_durations(&mut connection)?;
+    backfill_missing_cached_quality(&mut connection)?;
     let mut statement = connection.prepare(
         r#"
         SELECT

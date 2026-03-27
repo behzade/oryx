@@ -114,6 +114,7 @@ impl TransferManager {
         library: Library,
         selected_track: TrackSummary,
         track_position: Option<usize>,
+        collection_id_override: Option<String>,
         position: Option<Duration>,
     ) {
         let event_tx = self.event_tx.clone();
@@ -126,6 +127,7 @@ impl TransferManager {
                     library,
                     selected_track.clone(),
                     track_position,
+                    collection_id_override.clone(),
                     position,
                 );
                 let event = match result {
@@ -157,10 +159,15 @@ impl TransferManager {
         library: Library,
         selected_track: TrackSummary,
         track_position: Option<usize>,
+        collection_id_override: Option<String>,
     ) {
         let event_tx = self.event_tx.clone();
         let track_id = track_cache_key(&selected_track);
         let title = selected_track.title.clone();
+        let collection_id = selected_track
+            .collection_id
+            .clone()
+            .or(collection_id_override.clone());
         let progress = ProgressiveDownload::new();
         let _ = event_tx.send(TransferEvent::DownloadStarted {
             track_id: track_id.clone(),
@@ -192,7 +199,7 @@ impl TransferManager {
                         track_id,
                         title,
                         provider: selected_track.reference.provider,
-                        collection_id: selected_track.collection_id.clone(),
+                        collection_id,
                         purpose: DownloadPurpose::Explicit,
                     },
                     Err(_error) if progress.is_cancelled() => {
@@ -325,6 +332,7 @@ fn resolve_playback(
     library: Library,
     selected_track: TrackSummary,
     track_position: Option<usize>,
+    collection_id_override: Option<String>,
     position: Option<Duration>,
 ) -> anyhow::Result<ReadyPlayback> {
     if let Some(prepared) =
@@ -364,7 +372,10 @@ fn resolve_playback(
             track_id,
             title,
             selected_track.reference.provider,
-            selected_track.collection_id.clone(),
+            selected_track
+                .collection_id
+                .clone()
+                .or(collection_id_override),
             cache_monitor,
             DownloadPurpose::PlaybackPrefetch,
         );
@@ -579,7 +590,15 @@ mod tests {
             .expect("cached track row should be inserted");
 
         let (event_tx, _event_rx) = mpsc::channel();
-        let playback = resolve_playback(&event_tx, None, library, selected_track, Some(0), None)
+        let playback = resolve_playback(
+            &event_tx,
+            None,
+            library,
+            selected_track,
+            Some(0),
+            None,
+            None,
+        )
             .expect("cached playback should resolve without a provider");
 
         assert!(playback.fully_cached);
