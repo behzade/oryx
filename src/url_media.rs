@@ -828,7 +828,7 @@ fn yt_dlp_binary() -> Option<&'static PathBuf> {
 }
 
 fn resolve_yt_dlp_binary() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
+    let mut candidates: Vec<PathBuf> = Vec::new();
     #[cfg(target_os = "macos")]
     {
         candidates.push(PathBuf::from("/opt/homebrew/bin/yt-dlp"));
