@@ -592,7 +592,7 @@ fn bundled_provider_manifests_load_with_configured_ids() {
     .expect("fixture script manifest should be written");
 
     let providers =
-        load_configured_providers_from_sources(&config_dir, &[bundled_dir.clone()], None)
+        load_configured_providers_from_sources(&[config_dir.clone()], &[bundled_dir.clone()], None)
             .expect("configured providers should load from configured sources");
     let ids = providers
         .iter()
@@ -636,8 +636,9 @@ fn loader_falls_back_to_last_validated_manifest_when_candidate_breaks() {
     fs::write(provider_dir.join("fixturelive.toml"), &valid_manifest)
         .expect("valid manifest should be written");
 
-    let providers = load_configured_providers_from_sources(&provider_dir, &[], Some(&library))
-        .expect("valid manifest should load");
+    let providers =
+        load_configured_providers_from_sources(&[provider_dir.clone()], &[], Some(&library))
+            .expect("valid manifest should load");
     assert_eq!(providers.len(), 1);
 
     let stored = library
@@ -656,8 +657,9 @@ fn loader_falls_back_to_last_validated_manifest_when_candidate_breaks() {
     )
     .expect("broken manifest should be written");
 
-    let providers = load_configured_providers_from_sources(&provider_dir, &[], Some(&library))
-        .expect("loader should fall back to last validated manifest");
+    let providers =
+        load_configured_providers_from_sources(&[provider_dir.clone()], &[], Some(&library))
+            .expect("loader should fall back to last validated manifest");
     assert_eq!(providers.len(), 1);
 
     let stored = library
@@ -721,6 +723,57 @@ media_url_prefixes = ["https://example.com/media/"]
         raw_imported.status,
         ConfiguredProviderImportStatus::Activated
     );
+
+    fs::remove_dir_all(&root).expect("temp dir should be removed");
+}
+
+#[test]
+fn configured_provider_sources_prefer_first_config_dir_and_merge_fallback_dirs() {
+    let root = temp_test_dir("oryx-provider-precedence");
+    let preferred_dir = root.join("preferred");
+    let fallback_dir = root.join("fallback");
+    fs::create_dir_all(&preferred_dir).expect("preferred provider dir should exist");
+    fs::create_dir_all(&fallback_dir).expect("fallback provider dir should exist");
+
+    fs::write(
+        preferred_dir.join("fixture_html_provider.toml"),
+        HTML_PROVIDER_MANIFEST.replace(
+            "display_name = \"Fixture HTML Provider\"",
+            "display_name = \"Preferred HTML Provider\"",
+        ),
+    )
+    .expect("preferred manifest should be written");
+    fs::write(
+        fallback_dir.join("fixture_html_provider.toml"),
+        HTML_PROVIDER_MANIFEST,
+    )
+    .expect("fallback duplicate manifest should be written");
+    fs::write(
+        fallback_dir.join("fixture_script_provider.toml"),
+        SCRIPT_PROVIDER_MANIFEST,
+    )
+    .expect("fallback unique manifest should be written");
+
+    let providers = load_configured_providers_from_sources(
+        &[preferred_dir.clone(), fallback_dir.clone()],
+        &[],
+        None,
+    )
+    .expect("configured providers should load from multiple directories");
+
+    let ids = providers
+        .iter()
+        .map(|provider| provider.id())
+        .collect::<Vec<_>>();
+    assert_eq!(providers.len(), 2);
+    assert!(ids.contains(&ProviderId::parse("fixture_html_provider").unwrap()));
+    assert!(ids.contains(&ProviderId::parse("fixture_script_provider").unwrap()));
+
+    let preferred_provider = providers
+        .iter()
+        .find(|provider| provider.id() == ProviderId::parse("fixture_html_provider").unwrap())
+        .expect("preferred provider should be loaded");
+    assert_eq!(preferred_provider.display_name(), "Preferred HTML Provider");
 
     fs::remove_dir_all(&root).expect("temp dir should be removed");
 }

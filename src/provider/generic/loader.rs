@@ -31,34 +31,35 @@ pub(crate) struct ConfiguredProviderImport {
 }
 
 pub(super) fn load_configured_providers(library: Option<&Library>) -> Result<Vec<SharedProvider>> {
-    let provider_dir = provider_directory()?;
+    let provider_dirs = provider_directories()?;
     let bundled_dirs = bundled_provider_directories()?;
-    load_configured_providers_from_sources(&provider_dir, &bundled_dirs, library)
+    load_configured_providers_from_sources(&provider_dirs, &bundled_dirs, library)
 }
 
 pub(super) fn load_configured_providers_from_dir(
     provider_dir: &Path,
     library: Option<&Library>,
 ) -> Result<Vec<SharedProvider>> {
-    load_configured_providers_from_sources(provider_dir, &[], library)
+    load_configured_providers_from_sources(&[provider_dir.to_path_buf()], &[], library)
 }
 
 pub(super) fn load_configured_providers_from_sources(
-    provider_dir: &Path,
+    provider_dirs: &[PathBuf],
     bundled_dirs: &[PathBuf],
     library: Option<&Library>,
 ) -> Result<Vec<SharedProvider>> {
     let mut providers: Vec<SharedProvider> = Vec::new();
     let mut seen_ids = HashSet::from([ProviderId::Local.as_str().to_string()]);
 
-    fs::create_dir_all(provider_dir).with_context(|| {
-        format!(
-            "failed to create provider directory {}",
-            provider_dir.display()
-        )
-    })?;
-
-    load_directory(provider_dir, library, &mut seen_ids, &mut providers)?;
+    for provider_dir in provider_dirs {
+        fs::create_dir_all(provider_dir).with_context(|| {
+            format!(
+                "failed to create provider directory {}",
+                provider_dir.display()
+            )
+        })?;
+        load_directory(provider_dir, library, &mut seen_ids, &mut providers)?;
+    }
 
     for bundled_dir in bundled_dirs {
         if !bundled_dir.exists() {
@@ -71,15 +72,33 @@ pub(super) fn load_configured_providers_from_sources(
 }
 
 pub(super) fn provider_directory() -> Result<PathBuf> {
+    preferred_provider_directory()
+}
+
+fn provider_directories() -> Result<Vec<PathBuf>> {
     if let Ok(directory) = env::var("ORYX_PROVIDER_DIR") {
-        return Ok(PathBuf::from(directory));
+        return Ok(vec![PathBuf::from(directory)]);
     }
 
-    let root = dirs::config_dir()
-        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
-        .ok_or_else(|| anyhow!("failed to resolve Oryx config directory"))?;
+    let mut directories = Vec::new();
 
-    Ok(root.join("oryx").join("providers"))
+    #[cfg(not(target_os = "windows"))]
+    if let Some(home) = dirs::home_dir() {
+        directories.push(home.join(".config").join("oryx").join("providers"));
+    }
+
+    if let Some(root) = dirs::config_dir() {
+        directories.push(root.join("oryx").join("providers"));
+    }
+
+    unique_directories(directories)
+}
+
+fn preferred_provider_directory() -> Result<PathBuf> {
+    provider_directories()?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("failed to resolve Oryx config directory"))
 }
 
 fn bundled_provider_directories() -> Result<Vec<PathBuf>> {
@@ -97,6 +116,10 @@ fn bundled_provider_directories() -> Result<Vec<PathBuf>> {
         }
     }
 
+    unique_directories(directories)
+}
+
+fn unique_directories(directories: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     let mut unique = Vec::new();
     let mut seen = HashSet::new();
     for directory in directories {
@@ -106,7 +129,11 @@ fn bundled_provider_directories() -> Result<Vec<PathBuf>> {
         }
     }
 
-    Ok(unique)
+    if unique.is_empty() {
+        Err(anyhow!("failed to resolve Oryx config directory"))
+    } else {
+        Ok(unique)
+    }
 }
 
 fn load_provider_manifest(path: &Path) -> Result<ProviderManifest> {
@@ -194,7 +221,7 @@ pub(crate) fn export_provider_link(
     let manifest_toml = load_runtime_state(library, provider_id)?
         .and_then(|state| state.active_manifest_toml)
         .map(Ok)
-        .unwrap_or_else(|| read_manifest_toml_from_dir(&provider_directory()?, provider_id))?;
+        .unwrap_or_else(|| read_manifest_toml_from_dirs(&provider_directories()?, provider_id))?;
     export_provider_link_from_toml(&manifest_toml)
 }
 
@@ -202,7 +229,7 @@ pub(crate) fn import_provider_link(
     library: &Library,
     encoded: &str,
 ) -> Result<ConfiguredProviderImport> {
-    import_provider_link_into_dir(library, encoded, &provider_directory()?)
+    import_provider_link_into_dir(library, encoded, &preferred_provider_directory()?)
 }
 
 pub(super) fn export_provider_link_from_toml(manifest_toml: &str) -> Result<String> {
@@ -286,6 +313,21 @@ fn read_manifest_toml_from_dir(provider_dir: &Path, provider_id: ProviderId) -> 
     let path = provider_dir.join(format!("{}.toml", provider_id.as_str()));
     fs::read_to_string(&path)
         .with_context(|| format!("failed to read provider config {}", path.display()))
+}
+
+fn read_manifest_toml_from_dirs(
+    provider_dirs: &[PathBuf],
+    provider_id: ProviderId,
+) -> Result<String> {
+    let mut last_error = None;
+    for provider_dir in provider_dirs {
+        match read_manifest_toml_from_dir(provider_dir, provider_id) {
+            Ok(contents) => return Ok(contents),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow!("failed to read provider config for {}", provider_id)))
 }
 
 fn load_provider_from_candidate_path(
