@@ -1,6 +1,6 @@
 [package]
 name = "oryx"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 default-run = "oryx"
 license-file = "LICENSE"
