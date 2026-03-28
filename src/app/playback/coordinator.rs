@@ -120,9 +120,8 @@ impl OryxApp {
             return;
         };
 
-        let cancelled = self.transfer_state.update(cx, |state, _cx| {
-            state.cancel_explicit_download(&selected_track)
-        });
+        let cancelled =
+            self.update_transfer_state(cx, |state| state.cancel_explicit_download(&selected_track));
         if cancelled {
             self.status_message = Some(format!(
                 "Cancelled download for '{}'.",

@@ -32,7 +32,7 @@ impl OryxApp {
             }
         }
 
-        self.transfer_state.update(cx, |state, _cx| {
+        self.update_transfer_state(cx, |state| {
             state.restore_persisted_external_downloads(retained);
         });
         for download in pending {
@@ -139,9 +139,8 @@ impl OryxApp {
     }
 
     pub(super) fn cancel_external_download(&mut self, download_id: String, cx: &mut Context<Self>) {
-        let cancelled = self.transfer_state.update(cx, |state, _cx| {
-            state.cancel_external_download(&download_id)
-        });
+        let cancelled =
+            self.update_transfer_state(cx, |state| state.cancel_external_download(&download_id));
         if !cancelled {
             return;
         }
@@ -152,9 +151,8 @@ impl OryxApp {
     }
 
     pub(super) fn pause_external_download(&mut self, download_id: String, cx: &mut Context<Self>) {
-        let paused = self
-            .transfer_state
-            .update(cx, |state, _cx| state.pause_external_download(&download_id));
+        let paused =
+            self.update_transfer_state(cx, |state| state.pause_external_download(&download_id));
         if !paused {
             return;
         }
@@ -165,9 +163,8 @@ impl OryxApp {
     }
 
     pub(super) fn resume_external_download(&mut self, download_id: String, cx: &mut Context<Self>) {
-        let resumed = self.transfer_state.update(cx, |state, _cx| {
-            state.resume_external_download(&download_id)
-        });
+        let resumed =
+            self.update_transfer_state(cx, |state| state.resume_external_download(&download_id));
         if !resumed {
             return;
         }

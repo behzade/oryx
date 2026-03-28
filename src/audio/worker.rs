@@ -53,7 +53,10 @@ pub(super) fn playback_worker(
         let command = match rx.recv_timeout(OUTPUT_ROUTE_POLL_INTERVAL) {
             Ok(command) => command,
             Err(RecvTimeoutError::Timeout) => {
-                if let Some(backend) = backend.as_mut() {
+                if let Some(backend) = backend
+                    .as_mut()
+                    .filter(|backend| should_poll_output_route(backend.current.as_ref()))
+                {
                     observe_output_route(backend);
                 }
                 continue;
@@ -139,6 +142,7 @@ fn play_song(
     position: Option<Duration>,
 ) -> Result<()> {
     let backend = ensure_backend(backend, media_controls.take())?;
+    observe_output_route(backend);
     // macOS/CoreAudio route changes can leave a rodio/CPAL output stream silently stale without
     // emitting StreamInvalidated/DeviceNotAvailable. In the reproduced Bluetooth cases:
     // 1. The default output changed away from the headphones and sometimes back again.
@@ -313,8 +317,8 @@ fn runtime_status(backend: &mut Option<PlaybackBackend>) -> Result<PlaybackRunti
         });
     };
     drain_stream_errors(backend);
-    rebuild_output_if_needed(backend)?;
     observe_output_route(backend);
+    rebuild_output_if_needed(backend)?;
 
     let Some(player) = backend.player.as_ref() else {
         return Ok(PlaybackRuntimeStatus {
@@ -625,14 +629,42 @@ fn drain_stream_errors(backend: &mut PlaybackBackend) {
 
 fn observe_output_route(backend: &mut PlaybackBackend) {
     let default_output = current_default_output_device();
-    if backend.last_default_output != default_output {
+    mark_output_route_change(backend, default_output);
+}
+
+fn should_poll_output_route(current: Option<&CurrentPlayback>) -> bool {
+    current.is_some()
+}
+
+fn mark_output_route_change(
+    backend: &mut PlaybackBackend,
+    default_output: Option<OutputDeviceSnapshot>,
+) {
+    if output_route_changed(
+        backend.last_default_output.as_ref(),
+        default_output.as_ref(),
+    ) {
         // This flag intentionally survives until the next sink rebuild. A route change that
         // happens while "Playing" is just as dangerous as one that happens while "Paused": macOS
         // may pause playback after the route flip, and by then the stream can already be stale.
         // Requiring a rebuild only for paused-time changes misses that sequence.
         backend.route_changed_since_rebuild = true;
-        backend.last_default_output = default_output.clone();
+        if should_rebuild_on_output_route_change(backend.current.as_ref()) {
+            backend.needs_rebuild = true;
+        }
+        backend.last_default_output = default_output;
     }
+}
+
+fn should_rebuild_on_output_route_change(current: Option<&CurrentPlayback>) -> bool {
+    current.is_some()
+}
+
+fn output_route_changed(
+    last_default_output: Option<&OutputDeviceSnapshot>,
+    default_output: Option<&OutputDeviceSnapshot>,
+) -> bool {
+    last_default_output != default_output
 }
 
 fn debug_force_rebuild_on_resume_enabled() -> bool {
@@ -792,5 +824,50 @@ mod tests {
             .unwrap_or(false);
 
         assert!(at_track_end);
+    }
+
+    #[test]
+    fn output_route_polling_only_runs_while_a_track_is_loaded() {
+        assert!(!should_poll_output_route(None));
+        let current = fixture_current_playback();
+        assert!(should_poll_output_route(Some(&current)));
+    }
+
+    #[test]
+    fn output_route_change_detects_device_difference() {
+        let last_output = Some(OutputDeviceSnapshot {
+            id: "speaker-a".to_string(),
+            description: "Built-in Output".to_string(),
+        });
+        let new_output = Some(OutputDeviceSnapshot {
+            id: "speaker-b".to_string(),
+            description: "External Speaker".to_string(),
+        });
+
+        assert!(output_route_changed(
+            last_output.as_ref(),
+            new_output.as_ref(),
+        ));
+    }
+
+    #[test]
+    fn loaded_track_requires_rebuild_after_output_route_change() {
+        assert!(!should_rebuild_on_output_route_change(None));
+        let current = fixture_current_playback();
+        assert!(should_rebuild_on_output_route_change(Some(&current)));
+    }
+
+    fn fixture_current_playback() -> CurrentPlayback {
+        CurrentPlayback {
+            track: MediaSessionTrack {
+                title: "Track 1".to_string(),
+                artist: Some("Artist".to_string()),
+                album: Some("Album".to_string()),
+                artwork_url: None,
+                duration_seconds: Some(180),
+            },
+            source: PlaybackSource::LocalFile(std::env::temp_dir().join("oryx-idle.mp3")),
+            playback: PlaybackState::Paused,
+        }
     }
 }

@@ -162,12 +162,12 @@ impl TransferStateModel {
         items
     }
 
-    pub(super) fn has_active_downloads(&self) -> bool {
+    pub(super) fn needs_periodic_refresh(&self) -> bool {
         !self.downloads.is_empty()
             || self
                 .external_downloads
                 .iter()
-                .any(ExternalDownloadItem::is_active)
+                .any(ExternalDownloadItem::needs_periodic_refresh)
     }
 
     pub(super) fn active_download_count(&self) -> usize {
@@ -454,6 +454,15 @@ impl ExternalDownloadItem {
         )
     }
 
+    fn needs_periodic_refresh(&self) -> bool {
+        match &self.state {
+            DownloadItemState::Active { progress, .. } => !progress.snapshot().paused,
+            DownloadItemState::Queued { .. }
+            | DownloadItemState::Completed { .. }
+            | DownloadItemState::Failed { .. } => false,
+        }
+    }
+
     fn source_url(&self) -> Option<&str> {
         match &self.state {
             DownloadItemState::Queued { source_url, .. } => Some(source_url),
@@ -606,5 +615,51 @@ mod tests {
             downloads[0].state,
             DownloadItemState::Completed { .. }
         ));
+    }
+
+    #[test]
+    fn paused_external_download_does_not_need_periodic_refresh() {
+        let progress = ProgressiveDownload::new();
+        progress.pause();
+
+        let state = TransferStateModel {
+            downloads: HashMap::new(),
+            cancelled_downloads: HashSet::new(),
+            external_downloads: vec![ExternalDownloadItem {
+                id: "paused".to_string(),
+                title: "Paused".to_string(),
+                state: DownloadItemState::Active {
+                    progress,
+                    source_url: Some("https://example.com/paused".to_string()),
+                    destination: Some(PathBuf::from("/tmp/paused.mp4")),
+                    started_at: Instant::now(),
+                    duration_seconds: Some(120),
+                },
+            }],
+        };
+
+        assert_eq!(state.active_download_count(), 1);
+        assert!(!state.needs_periodic_refresh());
+    }
+
+    #[test]
+    fn active_external_download_needs_periodic_refresh() {
+        let state = TransferStateModel {
+            downloads: HashMap::new(),
+            cancelled_downloads: HashSet::new(),
+            external_downloads: vec![ExternalDownloadItem {
+                id: "active".to_string(),
+                title: "Active".to_string(),
+                state: DownloadItemState::Active {
+                    progress: ProgressiveDownload::new(),
+                    source_url: Some("https://example.com/active".to_string()),
+                    destination: Some(PathBuf::from("/tmp/active.mp4")),
+                    started_at: Instant::now(),
+                    duration_seconds: Some(120),
+                },
+            }],
+        };
+
+        assert!(state.needs_periodic_refresh());
     }
 }

@@ -242,6 +242,8 @@ struct OryxApp {
     browse_mode: BrowseMode,
     visible_local_track_list_override: Option<(BrowseMode, TrackList)>,
     status_message: Option<String>,
+    refresh_task_generation: u64,
+    refresh_task_running: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -308,6 +310,7 @@ impl OryxApp {
             &transfer_state,
             |this: &mut Self, _, event: &crate::transfer::TransferEvent, cx| {
                 this.handle_transfer_event(event.clone(), cx);
+                this.sync_refresh_task(cx);
             },
         );
         let playback_subscription = cx.subscribe(
@@ -349,6 +352,8 @@ impl OryxApp {
             ui_state,
             transfer,
             status_message: Some(restored.status_message),
+            refresh_task_generation: 0,
+            refresh_task_running: false,
             _subscriptions: vec![
                 transfer_subscription,
                 playback_subscription,
@@ -359,7 +364,7 @@ impl OryxApp {
         Self::spawn_media_control_listener(media_event_rx, playback_state, cx);
         Self::spawn_transfer_listener(transfer_rx, transfer_state, cx);
         app.restore_external_downloads(restored.external_downloads, cx);
-        Self::spawn_playback_refresh(cx);
+        app.sync_refresh_task(cx);
         Self::spawn_startup_audio_prewarm(playback, cx);
         if let Some(shutdown_rx) = shutdown_rx {
             Self::spawn_shutdown_listener(shutdown_rx, cx);
@@ -615,7 +620,7 @@ impl OryxApp {
         .detach();
     }
 
-    fn spawn_playback_refresh(cx: &mut Context<Self>) {
+    fn spawn_playback_refresh(refresh_generation: u64, cx: &mut Context<Self>) {
         let background = cx.background_executor().clone();
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let background = background.clone();
@@ -628,17 +633,12 @@ impl OryxApp {
                         })
                         .await;
 
-                    if this
-                        .update(&mut async_cx, |this, cx| {
-                            let has_active_downloads =
-                                this.transfer_state.read(cx).has_active_downloads();
-                            this.playback_state.update(cx, |playback, cx| {
-                                playback.handle_refresh_tick(has_active_downloads, cx);
-                            });
-                        })
-                        .is_err()
-                    {
-                        break;
+                    let should_continue = this.update(&mut async_cx, |this, cx| {
+                        this.handle_refresh_session_tick(refresh_generation, cx)
+                    });
+                    match should_continue {
+                        Ok(true) => {}
+                        Ok(false) | Err(_) => break,
                     }
                 }
             }
@@ -716,12 +716,74 @@ impl OryxApp {
         self.library_catalog.read(cx).track_is_cached(track)
     }
 
+    fn should_run_refresh_task(&self, cx: &App) -> bool {
+        self.transfer_state.read(cx).needs_periodic_refresh()
+            || self.playback_state.read(cx).should_poll_runtime()
+    }
+
+    fn sync_refresh_task(&mut self, cx: &mut Context<Self>) {
+        let should_run = self.should_run_refresh_task(cx);
+
+        if should_run {
+            if self.refresh_task_running {
+                return;
+            }
+
+            self.refresh_task_running = true;
+            self.refresh_task_generation = self.refresh_task_generation.wrapping_add(1);
+            Self::spawn_playback_refresh(self.refresh_task_generation, cx);
+            return;
+        }
+
+        if self.refresh_task_running {
+            self.refresh_task_running = false;
+            self.refresh_task_generation = self.refresh_task_generation.wrapping_add(1);
+        }
+    }
+
+    fn handle_refresh_session_tick(
+        &mut self,
+        refresh_generation: u64,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.refresh_task_matches(refresh_generation) {
+            return false;
+        }
+
+        let has_active_downloads = self.transfer_state.read(cx).needs_periodic_refresh();
+        self.playback_state.update(cx, |playback, cx| {
+            playback.handle_refresh_tick(has_active_downloads, cx);
+        });
+
+        let should_continue = self.should_run_refresh_task(cx);
+        if !should_continue && self.refresh_task_matches(refresh_generation) {
+            self.refresh_task_running = false;
+        }
+
+        should_continue && self.refresh_task_matches(refresh_generation)
+    }
+
+    fn refresh_task_matches(&self, refresh_generation: u64) -> bool {
+        self.refresh_task_running && self.refresh_task_generation == refresh_generation
+    }
+
     fn update_playback_state(
         &mut self,
         cx: &mut Context<Self>,
         update: impl FnOnce(&mut PlaybackModule),
     ) {
         self.playback_state.update(cx, |state, _cx| update(state));
+        self.sync_refresh_task(cx);
+    }
+
+    fn update_transfer_state<R>(
+        &mut self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut TransferStateModel) -> R,
+    ) -> R {
+        let result = self.transfer_state.update(cx, |state, _cx| update(state));
+        self.sync_refresh_task(cx);
+        result
     }
 
     fn update_ui_state(&mut self, cx: &mut Context<Self>, update: impl FnOnce(&mut UiState)) {
