@@ -1,4 +1,5 @@
 /target
+.codex
 .env
 .env.*
 *.pem
