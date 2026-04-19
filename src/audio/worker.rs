@@ -479,7 +479,10 @@ fn open_output_sink() -> Result<(
 
     if let Some(device) = default_device {
         match open_output_sink_for_device(device, error_tx.clone()) {
-            Ok((sink, sink_output)) => return Ok((sink, error_rx, sink_output)),
+            Ok((sink, sink_output)) => {
+                log_selected_output("opened default audio output", sink_output.as_ref());
+                return Ok((sink, error_rx, sink_output));
+            }
             Err(error) => {
                 eprintln!("failed to open default audio output, trying fallbacks: {error}");
             }
@@ -491,16 +494,31 @@ fn open_output_sink() -> Result<(
     let mut fallback_error = None;
     let devices = host
         .output_devices()
-        .context("Failed to enumerate audio outputs after default output resolution failed")?;
+        .context("Failed to enumerate audio outputs after default output resolution failed")?
+        .filter(usable_output_device)
+        .collect::<Vec<_>>();
 
-    for device in devices.filter(usable_output_device) {
-        if output_device_id(&device).is_some() && output_device_id(&device) == default_device_id {
-            continue;
-        }
+    let mut sorted_devices = devices
+        .into_iter()
+        .filter(|device| {
+            !(output_device_id(device).is_some() && output_device_id(device) == default_device_id)
+        })
+        .collect::<Vec<_>>();
+    sorted_devices.sort_by_key(output_device_preference);
 
+    for device in sorted_devices {
+        let attempted_output = snapshot_output_device(&device);
         match open_output_sink_for_device(device, error_tx.clone()) {
-            Ok((sink, sink_output)) => return Ok((sink, error_rx, sink_output)),
+            Ok((sink, sink_output)) => {
+                log_selected_output("opened fallback audio output", sink_output.as_ref());
+                return Ok((sink, error_rx, sink_output));
+            }
             Err(error) => {
+                log_output_open_failure(
+                    "fallback audio output failed",
+                    attempted_output.as_ref(),
+                    &error,
+                );
                 if fallback_error.is_none() {
                     fallback_error = Some(error);
                 }
@@ -544,6 +562,68 @@ fn usable_output_device(device: &rodio::cpal::Device) -> bool {
         .description()
         .map(|description| description.driver().is_some_and(|driver| driver != "null"))
         .unwrap_or(false)
+}
+
+fn output_device_preference(device: &rodio::cpal::Device) -> (u8, String) {
+    let snapshot = snapshot_output_device(device);
+    let description = snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.description.to_ascii_lowercase())
+        .unwrap_or_default();
+    let id = snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.id.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    (output_device_priority(&description, &id), description)
+}
+
+fn output_device_priority(description: &str, id: &str) -> u8 {
+    #[cfg(target_os = "linux")]
+    {
+        if id == "pipewire" || description.contains("pipewire") {
+            return 0;
+        }
+        if id == "pulse" || description.contains("pulseaudio") {
+            return 1;
+        }
+        if id == "default" || description.contains("default audio device") {
+            return 2;
+        }
+        if id == "jack" || description.contains("jack audio connection kit") {
+            return 4;
+        }
+        if id == "oss" || description.contains("open sound system") {
+            return 5;
+        }
+        return 3;
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (description, id);
+        0
+    }
+}
+
+fn log_selected_output(prefix: &str, output: Option<&OutputDeviceSnapshot>) {
+    if let Some(output) = output {
+        eprintln!("{prefix}: {} [{}]", output.description, output.id);
+    } else {
+        eprintln!("{prefix}: unknown output device");
+    }
+}
+
+fn log_output_open_failure(
+    prefix: &str,
+    output: Option<&OutputDeviceSnapshot>,
+    error: &anyhow::Error,
+) {
+    if let Some(output) = output {
+        eprintln!("{prefix}: {} [{}]: {error}", output.description, output.id);
+    } else {
+        eprintln!("{prefix}: unknown output device: {error}");
+    }
 }
 
 fn build_player(
@@ -916,6 +996,23 @@ mod tests {
         assert!(!should_rebuild_on_output_route_change(None));
         let current = fixture_current_playback();
         assert!(should_rebuild_on_output_route_change(Some(&current)));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_output_priority_prefers_pipewire_then_pulse() {
+        assert!(
+            output_device_priority("PipeWire Sound Server", "pipewire")
+                < output_device_priority("PulseAudio Sound Server", "pulse")
+        );
+        assert!(
+            output_device_priority("PulseAudio Sound Server", "pulse")
+                < output_device_priority("Built-in Audio", "hw:0,0")
+        );
+        assert!(
+            output_device_priority("Built-in Audio", "hw:0,0")
+                < output_device_priority("JACK Audio Connection Kit", "jack")
+        );
     }
 
     fn fixture_current_playback() -> CurrentPlayback {
