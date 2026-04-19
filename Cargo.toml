@@ -37,12 +37,16 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 product-name = "Oryx"
 identifier = "dev.oryx.app"
 category = "Music"
+formats = ["appimage", "deb", "pacman"]
 icons = ["assets/icons/app/icon.ico", "assets/icons/app/icon_512x512@2x.png"]
 binaries = [{ path = "oryx", main = true }]
 before-packaging-command = "cargo build --release --locked --bin oryx"
 
 [package.metadata.packager.appimage]
 bins = ["/usr/bin/xdg-open"]
+
+[package.metadata.packager.pacman]
+depends = ["ffmpeg", "yt-dlp"]
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1.23"

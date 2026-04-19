@@ -80,13 +80,13 @@ Oryx is not bound to `mpv` here. The external opener is intentionally generic, a
 Pushing a git tag triggers GitHub Actions to build and publish:
 
 - macOS `.dmg`
-- Linux `.AppImage` and `.deb`
+- Linux `.AppImage`, `.deb`, and pacman package outputs
 - Windows NSIS installer `.exe`
 
 Build a release package locally:
 
 ```bash
-cargo packager --release --formats <dmg|appimage|deb|nsis>
+cargo packager --release --formats <dmg|appimage|deb|pacman|nsis>
 ```
 
 Artifacts are written under `target/release`.

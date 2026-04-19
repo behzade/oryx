@@ -26,11 +26,13 @@ jobs:
             artifact_paths: target/release/*.dmg
           - label: Linux
             os: ubuntu-latest
-            formats: appimage,deb
+            formats: appimage,deb,pacman
             artifact_name: packages-linux
             artifact_paths: |
               target/release/*.AppImage
               target/release/*.deb
+              target/release/*.tar.gz
+              target/release/PKGBUILD
           - label: Windows
             os: windows-latest
             formats: nsis

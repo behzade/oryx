@@ -278,7 +278,7 @@ fn ensure_backend(
     media_controls: Option<MediaControls>,
 ) -> Result<&mut PlaybackBackend> {
     if backend.is_none() {
-        let (mut sink, stream_errors, sink_output) = open_output_sink()?;
+        let (mut sink, stream_errors, _sink_output) = open_output_sink()?;
         sink.log_on_drop(false);
         *backend = Some(PlaybackBackend {
             sink,
@@ -288,7 +288,7 @@ fn ensure_backend(
             stream_errors,
             needs_rebuild: false,
             current: None,
-            last_default_output: sink_output,
+            last_default_output: current_default_output_device(),
             route_changed_since_rebuild: false,
         });
     } else if let Some(media_controls) = media_controls {
@@ -473,16 +473,77 @@ fn open_output_sink() -> Result<(
     Option<OutputDeviceSnapshot>,
 )> {
     let (error_tx, error_rx) = mpsc::channel();
+    let host = rodio::cpal::default_host();
+    let default_device = host.default_output_device();
+    let default_device_id = default_device.as_ref().and_then(output_device_id);
+
+    if let Some(device) = default_device {
+        match open_output_sink_for_device(device, error_tx.clone()) {
+            Ok((sink, sink_output)) => return Ok((sink, error_rx, sink_output)),
+            Err(error) => {
+                eprintln!("failed to open default audio output, trying fallbacks: {error}");
+            }
+        }
+    } else {
+        eprintln!("failed to resolve the default audio output, trying enumerated fallbacks");
+    }
+
+    let mut fallback_error = None;
+    let devices = host
+        .output_devices()
+        .context("Failed to enumerate audio outputs after default output resolution failed")?;
+
+    for device in devices.filter(usable_output_device) {
+        if output_device_id(&device).is_some() && output_device_id(&device) == default_device_id {
+            continue;
+        }
+
+        match open_output_sink_for_device(device, error_tx.clone()) {
+            Ok((sink, sink_output)) => return Ok((sink, error_rx, sink_output)),
+            Err(error) => {
+                if fallback_error.is_none() {
+                    fallback_error = Some(error);
+                }
+            }
+        }
+    }
+
+    Err(fallback_error
+        .unwrap_or_else(|| anyhow::anyhow!("Failed to resolve a working audio output")))
+}
+
+fn open_output_sink_for_device(
+    device: rodio::cpal::Device,
+    error_tx: mpsc::Sender<StreamError>,
+) -> Result<(MixerDeviceSink, Option<OutputDeviceSnapshot>)> {
+    let sink_output = snapshot_output_device(&device);
+    let device_name = sink_output
+        .as_ref()
+        .map(|snapshot| snapshot.description.clone())
+        .unwrap_or_else(|| "unknown output device".to_string());
+
     let error_callback = move |error| {
         let _ = error_tx.send(error);
     };
-    let sink_output = current_default_output_device();
-    let sink = DeviceSinkBuilder::from_default_device()
-        .context("Failed to resolve the default audio output")?
+
+    let sink = DeviceSinkBuilder::from_device(device)
+        .with_context(|| format!("Failed to configure audio output for {device_name}"))?
         .with_error_callback(error_callback)
         .open_sink_or_fallback()
-        .context("Failed to open the default audio output")?;
-    Ok((sink, error_rx, sink_output))
+        .with_context(|| format!("Failed to open audio output for {device_name}"))?;
+
+    Ok((sink, sink_output))
+}
+
+fn output_device_id(device: &rodio::cpal::Device) -> Option<String> {
+    device.id().ok().map(|id| id.to_string())
+}
+
+fn usable_output_device(device: &rodio::cpal::Device) -> bool {
+    device
+        .description()
+        .map(|description| description.driver().is_some_and(|driver| driver != "null"))
+        .unwrap_or(false)
 }
 
 fn build_player(
@@ -568,7 +629,7 @@ fn rebuild_output_if_needed(backend: &mut PlaybackBackend) -> Result<()> {
     }
 
     let position = playback_position(backend).unwrap_or_default();
-    let (mut sink, stream_errors, sink_output) = open_output_sink()?;
+    let (mut sink, stream_errors, _sink_output) = open_output_sink()?;
     sink.log_on_drop(false);
     if let Some(player) = backend.player.take() {
         player.stop();
@@ -576,7 +637,7 @@ fn rebuild_output_if_needed(backend: &mut PlaybackBackend) -> Result<()> {
     backend.sink = sink;
     backend.stream_errors = stream_errors;
     backend.needs_rebuild = false;
-    backend.last_default_output = sink_output.clone();
+    backend.last_default_output = current_default_output_device();
     backend.route_changed_since_rebuild = false;
 
     let Some(current) = backend.current.clone() else {
