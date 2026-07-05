@@ -7,6 +7,7 @@ mod app;
 mod assets;
 mod audio;
 mod keybindings;
+mod launch;
 mod library;
 mod metadata;
 mod model;
@@ -19,7 +20,16 @@ mod transfer;
 mod url_media;
 
 fn main() {
-    if let Err(error) = app::run() {
+    let launch_options = match launch::prepare() {
+        Ok(Some(options)) => options,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(error) = app::run(launch_options) {
         eprintln!("{error}");
         std::process::exit(1);
     }

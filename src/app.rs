@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use crate::audio::PlaybackController;
 use crate::keybindings;
+use crate::launch::LaunchOptions;
 use crate::library::Library;
 use crate::platform;
 use crate::provider::{
@@ -151,8 +152,10 @@ fn install_signal_shutdown_handlers() -> Option<Arc<Mutex<Receiver<()>>>> {
     None
 }
 
-pub fn run() -> Result<()> {
+pub fn run(launch_options: LaunchOptions) -> Result<()> {
     let shutdown_rx = install_signal_shutdown_handlers();
+    let initial_open_url = launch_options.initial_open_url;
+    let open_url_ipc_rx = launch_options.ipc_rx.map(|rx| Arc::new(Mutex::new(rx)));
     let app = Application::new().with_assets(EmbeddedAssetSource::new());
     app.run(move |cx: &mut App| {
         platform::setup_app(cx);
@@ -186,6 +189,8 @@ pub fn run() -> Result<()> {
         let startup_window = startup_window_dimensions(cx);
         let bounds = Bounds::centered(None, startup_window.size, cx);
 
+        let initial_open_url = initial_open_url.clone();
+        let open_url_ipc_rx = open_url_ipc_rx.clone();
         let window = cx
             .open_window(
                 WindowOptions {
@@ -210,6 +215,12 @@ pub fn run() -> Result<()> {
             window.activate_window();
             window.focus(&root.shell_focus_handle);
             cx.activate(true);
+            if let Some(url) = initial_open_url {
+                root.queue_external_open_url(url, cx);
+            }
+            if let Some(open_url_ipc_rx) = open_url_ipc_rx {
+                OryxApp::spawn_open_url_ipc_listener(open_url_ipc_rx, cx);
+            }
         });
     });
 
@@ -707,6 +718,36 @@ impl OryxApp {
                 let _ = this.update(&mut async_cx, |this, cx| {
                     this.handle_shutdown_request(cx);
                 });
+            }
+        })
+        .detach();
+    }
+
+    fn spawn_open_url_ipc_listener(receiver: Arc<Mutex<Receiver<String>>>, cx: &mut Context<Self>) {
+        let background = cx.background_executor().clone();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let background = background.clone();
+            let mut async_cx = cx.clone();
+            async move {
+                loop {
+                    let receiver = receiver.clone();
+                    let url = background
+                        .spawn(async move { receiver.lock().ok()?.recv().ok() })
+                        .await;
+
+                    let Some(url) = url else {
+                        break;
+                    };
+
+                    if this
+                        .update(&mut async_cx, |this, cx| {
+                            this.queue_external_open_url(url, cx);
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
             }
         })
         .detach();

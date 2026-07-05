@@ -97,30 +97,46 @@ impl OryxApp {
             }
         };
 
+        self.open_url_input.reset(String::new());
+        self.queue_external_open_url(normalized_url, cx);
+    }
+
+    pub(super) fn queue_external_open_url(
+        &mut self,
+        normalized_url: String,
+        cx: &mut Context<Self>,
+    ) {
         let existing = self
             .transfer_state
             .read(cx)
             .external_download_for_url(&normalized_url);
         if let Some(existing) = existing {
-            self.open_url_input.reset(String::new());
-            self.update_ui_state(cx, |state| {
-                state.reset_open_url_prompt();
-                state.open_downloads_modal();
-            });
             match existing.state {
                 DownloadItemState::Queued { .. } | DownloadItemState::Active { .. } => {
+                    self.update_ui_state(cx, |state| {
+                        state.reset_open_url_prompt();
+                        state.open_downloads_modal();
+                    });
                     self.status_message =
                         Some(format!("'{}' is already downloading.", existing.title));
                     cx.notify();
                     return;
                 }
                 DownloadItemState::Completed { .. } => {
+                    self.update_ui_state(cx, |state| {
+                        state.reset_open_url_prompt();
+                        state.open_downloads_modal();
+                    });
                     self.status_message =
                         Some(format!("'{}' is already in Downloads.", existing.title));
                     cx.notify();
                     return;
                 }
                 DownloadItemState::Failed { destination, .. } => {
+                    self.update_ui_state(cx, |state| {
+                        state.reset_open_url_prompt();
+                        state.open_downloads_modal();
+                    });
                     self.retry_external_download(existing.id, normalized_url, destination, cx);
                     return;
                 }
@@ -129,7 +145,6 @@ impl OryxApp {
 
         self.transfer
             .queue_external_url_download(normalized_url.clone());
-        self.open_url_input.reset(String::new());
         self.update_ui_state(cx, |state| {
             state.reset_open_url_prompt();
             state.open_downloads_modal();

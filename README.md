@@ -55,6 +55,16 @@ See [docs/provider-config.md](./docs/provider-config.md) for the manifest format
 - `ffmpeg` and `ffprobe` on `PATH` for import normalization and media probing
 - `yt-dlp` available at runtime for the `Open Media...` flow to resolve downloadable media URLs
 
+## Arch Linux
+
+Oryx is available on the AUR as [`oryx-music-player-bin`](https://aur.archlinux.org/packages/oryx-music-player-bin).
+
+```bash
+yay -S oryx-music-player-bin
+```
+
+The package installs the command as `oryx-music-player` to avoid conflicting with Arch Linux's unrelated `oryx` package.
+
 ## Development
 
 Check the project:
