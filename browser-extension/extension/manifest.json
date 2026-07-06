@@ -3,16 +3,30 @@
   "name": "Oryx URL Opener",
   "description": "Send the current tab or selected link to Oryx.",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA63aPQOoedjsHPsOOvM6ejowix4qwybh6IVeQ0NUP2u6n4Y21BQhGyrRrHx3rZdtXLUPHztkP05VunBG3YWfF0cLwASdj/nTggbxVfwOd6UQx7cuFYO5CKrOKHvv/56JFdt5lYOcc1xLxtSbsWeL8SPJ/qM4kJa8ty752R/ROLbLdqvaBMAMtFmL1fw3OmPlG4AgeVlK/iZ3I799baQ3h4d1V2dhv1heO/WZ/YHApZgsK4U0mCTNNF4y82UpF61B5hvklLqiC05pllfftrdBbe8/Q3k6bP0wanDMjvXWWk8QXoPi3g73kZlG5trpX5W+HxMvmg1+SXZyC3dLVlR+zqwIDAQAB",
   "minimum_chrome_version": "102",
   "permissions": [
     "activeTab",
-    "contextMenus"
+    "contextMenus",
+    "nativeMessaging"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
-    "default_title": "Open in Oryx"
+    "default_title": "Open in Oryx",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   }
 }
