@@ -38,7 +38,15 @@ product-name = "Oryx"
 identifier = "dev.oryx.app"
 category = "Music"
 formats = ["appimage", "deb", "pacman"]
-icons = ["assets/icons/app/icon.ico", "assets/icons/app/icon_512x512@2x.png"]
+icons = [
+  "assets/icons/app/icon.ico",
+  "assets/icons/app/icon_16x16.png",
+  "assets/icons/app/icon_32x32.png",
+  "assets/icons/app/icon_128x128.png",
+  "assets/icons/app/icon_256x256.png",
+  "assets/icons/app/icon_512x512.png",
+  "assets/icons/app/icon_512x512@2x.png",
+]
 binaries = [{ path = "oryx", main = true }]
 before-packaging-command = "cargo build --release --locked --bin oryx"
 
