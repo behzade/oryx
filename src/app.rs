@@ -41,7 +41,10 @@ use souvlaki::MediaControlEvent;
 
 use self::discover::DiscoverModule;
 use self::library::LibraryModule;
-use self::playback::{PlaybackIntent, PlaybackModule, PlaybackRuntimeEvent};
+use self::playback::{
+    PlaybackIntent, PlaybackModule, PlaybackRuntimeEvent, VisualizerEvent, VisualizerMode,
+    VisualizerView,
+};
 use self::session_state::restored_session_state;
 use self::text_input::TextInputState;
 use self::transfer_state::ActiveTransfer;
@@ -240,6 +243,8 @@ struct OryxApp {
     library_catalog: Entity<LibraryModule>,
     discover: Entity<DiscoverModule>,
     playback_state: Entity<PlaybackModule>,
+    compact_visualizer: Entity<VisualizerView>,
+    modal_visualizer: Entity<VisualizerView>,
     transfer_state: Entity<TransferStateModel>,
     notifications: Entity<NotificationCenter>,
     ui_state: Entity<UiState>,
@@ -314,6 +319,10 @@ impl OryxApp {
                 restored.shuffle_seed,
             )
         });
+        let compact_visualizer =
+            cx.new(|_cx| VisualizerView::new(playback_state.clone(), VisualizerMode::Compact));
+        let modal_visualizer =
+            cx.new(|_cx| VisualizerView::new(playback_state.clone(), VisualizerMode::Modal));
         let transfer_state = cx.new(|_cx| TransferStateModel::new());
         let notifications = cx.new(|_cx| NotificationCenter::new());
         let ui_state = cx.new(|_cx| UiState::new());
@@ -334,6 +343,20 @@ impl OryxApp {
             &playback_state,
             |this: &mut Self, _, event: &PlaybackRuntimeEvent, cx| {
                 this.handle_playback_runtime_event(event.clone(), cx);
+            },
+        );
+        let compact_visualizer_subscription = cx.subscribe(
+            &compact_visualizer,
+            |this: &mut Self, _, event: &VisualizerEvent, cx| match event {
+                VisualizerEvent::OpenRequested => this.open_visualizer_modal(cx),
+                VisualizerEvent::CloseRequested => {}
+            },
+        );
+        let modal_visualizer_subscription = cx.subscribe(
+            &modal_visualizer,
+            |this: &mut Self, _, event: &VisualizerEvent, cx| match event {
+                VisualizerEvent::OpenRequested => {}
+                VisualizerEvent::CloseRequested => this.close_visualizer_modal(cx),
             },
         );
 
@@ -358,6 +381,8 @@ impl OryxApp {
             library_catalog,
             discover,
             playback_state: playback_state.clone(),
+            compact_visualizer,
+            modal_visualizer,
             transfer_state: transfer_state.clone(),
             notifications,
             ui_state,
@@ -369,6 +394,8 @@ impl OryxApp {
                 transfer_subscription,
                 playback_subscription,
                 playback_runtime_subscription,
+                compact_visualizer_subscription,
+                modal_visualizer_subscription,
             ],
         };
 

@@ -15,6 +15,7 @@ gpui = "0.2.2"
 html-escape = "0.2.13"
 lofty = "0.22"
 raw-window-handle = "0.6.2"
+rustfft = "6.4.1"
 rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "4aa22e85e5ad5565c45dfdda95051158eb6b56c3", features = ["symphonia-libopus"] }
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 scraper = "0.24.0"

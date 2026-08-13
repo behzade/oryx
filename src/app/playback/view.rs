@@ -182,7 +182,7 @@ impl OryxApp {
 
     pub(in crate::app) fn render_now_playing(
         &self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let (now_playing, playback_status, repeat_mode, shuffle_enabled, play_loading) = {
@@ -247,11 +247,6 @@ impl OryxApp {
             RepeatMode::Off | RepeatMode::All => AppIcon::RepeatAll,
             RepeatMode::One => AppIcon::RepeatOne,
         };
-        let visualizer_levels = self.playback_state.read(cx).visualizer_snapshot();
-        if matches!(playback_status, PlaybackStatus::Playing) {
-            window.request_animation_frame();
-        }
-
         div()
             .w_full()
             .px(px(theme::SPACE_4))
@@ -425,28 +420,12 @@ impl OryxApp {
                     ),
             )
             .child(
-                div().flex_1().min_w_0().flex().justify_end().child(
-                    div()
-                        .w_full()
-                        .max_w(px(280.))
-                        .h(px(76.))
-                        .px(px(theme::SPACE_3))
-                        .py(px(theme::SPACE_2))
-                        .rounded(px(10.))
-                        .border_1()
-                        .border_color(rgb(theme::ROW_IDLE_BORDER))
-                        .bg(rgb(theme::SURFACE_BASE))
-                        .when(!controls_disabled, |waveform| waveform.cursor_pointer())
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
-                                if !controls_disabled {
-                                    this.open_visualizer_modal(cx);
-                                }
-                            }),
-                        )
-                        .child(Self::render_waveform(&visualizer_levels, 58.)),
-                ),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .justify_end()
+                    .child(self.compact_visualizer.clone()),
             )
     }
 
@@ -464,103 +443,11 @@ impl OryxApp {
         }
     }
 
-    pub(in crate::app) fn render_visualizer_modal(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let levels = self.playback_state.read(cx).visualizer_snapshot();
-        let title = self
-            .playback_state
-            .read(cx)
-            .now_playing()
-            .map(|track| track.title)
-            .unwrap_or_else(|| "Nothing selected".to_string());
-
-        super::super::ui::render_modal_overlay(super::super::ui::render_modal_card(
-            super::super::ui::ModalWidth::Wide,
-            super::super::ui::render_modal_body(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::SPACE_4))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(theme::SPACE_1))
-                                    .child(
-                                        div()
-                                            .text_size(px(18.))
-                                            .font_weight(FontWeight::BOLD)
-                                            .child("Waveform"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(theme::META_SIZE))
-                                            .text_color(rgb(theme::TEXT_MUTED))
-                                            .child(title),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .px(px(theme::SPACE_3))
-                                    .py(px(theme::SPACE_2))
-                                    .rounded(px(10.))
-                                    .cursor_pointer()
-                                    .bg(rgb(theme::SURFACE_BASE))
-                                    .text_size(px(theme::META_SIZE))
-                                    .text_color(rgb(theme::TEXT_MUTED))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(
-                                            |this, _event: &MouseDownEvent, _window, cx| {
-                                                this.close_visualizer_modal(cx);
-                                            },
-                                        ),
-                                    )
-                                    .child("Close"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(300.))
-                            .px(px(theme::SPACE_4))
-                            .rounded(px(12.))
-                            .border_1()
-                            .border_color(rgb(theme::ROW_IDLE_BORDER))
-                            .bg(rgb(theme::SURFACE_BASE))
-                            .child(Self::render_waveform(&levels, 260.)),
-                    ),
-                false,
-            ),
-        ))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                window.prevent_default();
-                this.close_visualizer_modal(cx);
-            }),
-        )
-    }
-
-    fn render_waveform(levels: &[f32], height: f32) -> gpui::Div {
-        let mut waveform = div().size_full().flex().items_center().gap(px(2.));
-        for level in levels {
-            let bar_height = (height * level.clamp(0.0, 1.0)).max(2.0);
-            waveform = waveform.child(
-                div()
-                    .flex_1()
-                    .min_w(px(1.))
-                    .h(px(bar_height))
-                    .rounded(px(theme::RADIUS_FULL))
-                    .bg(rgb(theme::ACCENT_PRIMARY)),
-            );
-        }
-        waveform
+    pub(in crate::app) fn render_visualizer_modal(
+        &self,
+        _cx: &mut Context<Self>,
+    ) -> gpui::Entity<super::VisualizerView> {
+        self.modal_visualizer.clone()
     }
 
     fn finish_playback_without_next(&mut self, message: &str, cx: &mut Context<Self>) {

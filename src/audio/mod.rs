@@ -14,7 +14,7 @@ use souvlaki::MediaControlEvent;
 
 use crate::progressive::ProgressiveDownload;
 
-pub use visualizer::{AudioVisualizer, VISUALIZER_BUCKETS};
+pub use visualizer::{AudioVisualizer, VISUALIZER_NOTES, VISUALIZER_OCTAVES, VisualizerSnapshot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlaybackState {
@@ -72,7 +72,7 @@ impl PlaybackController {
         (Self { tx, visualizer }, event_rx)
     }
 
-    pub fn visualizer_snapshot(&self) -> [f32; VISUALIZER_BUCKETS] {
+    pub fn visualizer_snapshot(&self) -> VisualizerSnapshot {
         self.visualizer.snapshot()
     }
 

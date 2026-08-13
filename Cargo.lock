@@ -4145,6 +4145,7 @@ dependencies = [
  "raw-window-handle",
  "rodio",
  "rusqlite",
+ "rustfft",
  "scraper",
  "serde",
  "serde_json",

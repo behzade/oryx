@@ -8,7 +8,6 @@ use url::Url;
 
 use crate::audio::{
     MediaSessionTrack, PlaybackController, PlaybackRuntimeStatus, PlaybackSource, PlaybackState,
-    VISUALIZER_BUCKETS,
 };
 use crate::model::{PlaybackStatus, RepeatMode, Track};
 use crate::provider::{ProviderId, TrackList};
@@ -144,7 +143,7 @@ impl PlaybackModule {
         self.controller.runtime_status()
     }
 
-    pub(in crate::app) fn visualizer_snapshot(&self) -> [f32; VISUALIZER_BUCKETS] {
+    pub(in crate::app) fn visualizer_snapshot(&self) -> crate::audio::VisualizerSnapshot {
         self.controller.visualizer_snapshot()
     }
 

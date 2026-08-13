@@ -10,6 +10,14 @@ impl OryxApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        let visualizer_modal_open = self.ui_state.read(cx).visualizer_modal_open();
+        self.compact_visualizer.update(cx, |visualizer, cx| {
+            visualizer.set_visible(!visualizer_modal_open, cx)
+        });
+        self.modal_visualizer.update(cx, |visualizer, cx| {
+            visualizer.set_visible(visualizer_modal_open, cx)
+        });
+
         shell
             .child(self.render_notifications(window, cx))
             .when(self.ui_state.read(cx).app_menu_open(), |shell| {
@@ -18,7 +26,7 @@ impl OryxApp {
             .when(self.ui_state.read(cx).downloads_modal_open(), |shell| {
                 shell.child(self.render_downloads_modal(cx))
             })
-            .when(self.ui_state.read(cx).visualizer_modal_open(), |shell| {
+            .when(visualizer_modal_open, |shell| {
                 shell.child(self.render_visualizer_modal(cx))
             })
             .when(self.ui_state.read(cx).open_url_prompt_open(), |shell| {
