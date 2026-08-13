@@ -88,10 +88,7 @@ impl OryxApp {
         }
 
         let Some(provider) = self.provider_for_id(selected_track.reference.provider) else {
-            self.status_message = Some(format!(
-                "Provider '{}' is not available.",
-                selected_track.reference.provider
-            ));
+            self.status_message = Some("The selected source is not available.".to_string());
             cx.notify();
             return;
         };

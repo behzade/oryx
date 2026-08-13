@@ -22,7 +22,7 @@ use crate::theme;
 use crate::url_media::fallback_download_name;
 
 use self::rows::{
-    action_button, collection_quality_metadata, download_progress_ratio, metadata_label,
+    action_button, collection_quality_metadata, download_progress_ratio, quality_row_metadata,
     render_collection_artwork, vertical_divider,
 };
 use super::library::{
@@ -416,28 +416,22 @@ impl OryxApp {
             .read(cx)
             .collection_quality(&collection.reference)
             .and_then(|summary| collection_quality_metadata(&summary));
-        metadata_label(collection.reference.provider, quality, true)
+        quality_row_metadata(quality)
     }
 
     fn track_list_metadata(&self, track_list: &TrackList, cx: &App) -> Option<rows::RowMetadata> {
-        let provider = track_list
-            .tracks
-            .first()
-            .map(|track| track.reference.provider)
-            .unwrap_or(track_list.collection.reference.provider);
         let quality = self
             .library_catalog
             .read(cx)
             .collection_quality(&track_list.collection.reference)
             .or_else(|| summarize_track_list_quality(track_list))
             .and_then(|summary| collection_quality_metadata(&summary));
-        metadata_label(provider, quality, provider != ProviderId::Local)
+        quality_row_metadata(quality)
     }
 
     fn track_metadata_for_collection(
         &self,
         track: &TrackSummary,
-        collection_provider: ProviderId,
         collection_quality: Option<&CollectionQualitySummary>,
         cx: &App,
     ) -> Option<rows::RowMetadata> {
@@ -467,11 +461,7 @@ impl OryxApp {
             None
         };
 
-        metadata_label(
-            track.reference.provider,
-            quality,
-            track.reference.provider != collection_provider,
-        )
+        quality_row_metadata(quality)
     }
 
     pub(super) fn render_provider_auth_overlay(

@@ -435,7 +435,7 @@ impl OryxApp {
         cx: &mut Context<Self>,
     ) {
         let Some(provider) = self.provider_for_id(provider_id) else {
-            self.status_message = Some(format!("Provider '{}' is not available.", provider_id));
+            self.status_message = Some("The selected source is not available.".to_string());
             self.discover.update(cx, |discover, _cx| {
                 discover.close_source_picker();
             });
@@ -448,10 +448,7 @@ impl OryxApp {
             self.discover.update(cx, |discover, _cx| {
                 discover.disable_provider(provider_id);
             });
-            self.reset_discover_scope(
-                format!("Disabled {} for search.", provider.display_name()),
-                cx,
-            );
+            self.reset_discover_scope("Search source disabled.".to_string(), cx);
             return;
         }
 
@@ -463,10 +460,7 @@ impl OryxApp {
         self.discover.update(cx, |discover, _cx| {
             discover.enable_provider(provider_id);
         });
-        self.reset_discover_scope(
-            format!("Enabled {} for search.", provider.display_name()),
-            cx,
-        );
+        self.reset_discover_scope("Search source enabled.".to_string(), cx);
     }
 
     fn reset_discover_scope(&mut self, message: String, cx: &mut Context<Self>) {

@@ -2,11 +2,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::provider::{AudioFormat, ProviderId, TrackSummary};
+use crate::provider::{AudioFormat, TrackSummary};
 
 #[derive(Clone, Debug)]
 pub struct Track {
-    pub provider: ProviderId,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -77,7 +76,6 @@ impl RepeatMode {
 impl Track {
     pub fn from_provider_track(track: TrackSummary) -> Self {
         Self {
-            provider: track.reference.provider,
             title: track.title,
             artist: track.artist.unwrap_or_else(|| "Unknown artist".to_string()),
             album: track.album.unwrap_or_else(|| "Unknown album".to_string()),

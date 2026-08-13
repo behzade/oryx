@@ -20,10 +20,7 @@ impl OryxApp {
         self.provider_auth_password_input.reset(String::new());
         self.update_ui_state(cx, |state| state.open_provider_auth_prompt(provider_id));
         self.focus_text_input(&TextInputId::ProviderAuthUsername, window);
-        self.status_message = Some(format!(
-            "Sign in to {} to use authenticated playback URLs.",
-            provider_id
-        ));
+        self.status_message = Some("Sign in to use authenticated playback URLs.".to_string());
         cx.notify();
     }
 
@@ -103,16 +100,9 @@ impl OryxApp {
                         this.discover.update(cx, |discover, _cx| {
                             discover.enable_provider(provider_id);
                         });
-                        let provider_name = this
-                            .provider_for_id(provider_id)
-                            .map(|provider| provider.display_name().to_string())
-                            .unwrap_or_else(|| provider_id.display_name().to_string());
-                        this.reset_discover_scope(
-                            format!("Enabled {provider_name} for search."),
-                            cx,
-                        );
+                        this.reset_discover_scope("Search source enabled.".to_string(), cx);
                         this.show_notification(
-                            format!("Signed in to {}.", provider_name),
+                            "Signed in successfully.",
                             NotificationLevel::Success,
                             cx,
                         );

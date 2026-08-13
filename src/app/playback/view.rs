@@ -223,10 +223,7 @@ impl OryxApp {
                     track.duration_label.clone(),
                 ];
                 if let Some(quality) = now_playing_quality_label(track) {
-                    parts.push(track.provider.display_name().to_string());
                     parts.push(quality);
-                } else {
-                    parts.push(track.provider.display_name().to_string());
                 }
                 parts.join("  •  ")
             })

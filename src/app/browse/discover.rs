@@ -436,12 +436,8 @@ impl OryxApp {
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         if self.discover.read(cx).search_loading() {
-            let loading_message = format!(
-                "Searching {}...",
-                self.discover.read(cx).active_source_label(&self.providers)
-            );
             return self
-                .render_discover_results_body(window, empty_state(&loading_message), cx)
+                .render_discover_results_body(window, empty_state("Searching..."), cx)
                 .w(px(self.discovery_column_width(window)))
                 .bg(rgb(theme::SURFACE_BASE))
                 .px(px(theme::SPACE_3))

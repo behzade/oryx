@@ -1,29 +1,7 @@
 # Contributing
 
-This repository is public for transparency, issue reporting, and source distribution. It is not an open collaboration project.
+Bug reports and feature requests are welcome. Include your platform, steps to reproduce the issue, and useful logs or screenshots.
 
-## What Is Welcome
+This is a source-available project, not an open contribution project. Do not open a pull request unless the maintainer asks for one.
 
-- bug reports
-- reproduction steps
-- crash logs
-- compatibility reports
-- feature requests
-
-## What Is Not Being Accepted
-
-- pull requests
-- unsolicited large code changes
-- redistributed builds presented as official
-
-## Before Opening An Issue
-
-- confirm the problem on the latest published build or current `main`
-- include platform details and clear reproduction steps
-- include logs, screenshots, or sample files when relevant
-
-## Pull Requests
-
-Please do not open pull requests unless the maintainer explicitly asks for one.
-
-Unsolicited pull requests may be closed without review so the repository stays aligned with its source-available distribution model.
+Only builds published by the maintainer are official.

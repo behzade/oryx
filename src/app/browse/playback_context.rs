@@ -74,7 +74,6 @@ impl OryxApp {
                         );
                         let metadata = this.track_metadata_for_collection(
                             &track,
-                            playback_context.collection.reference.provider,
                             playback_collection_quality.as_ref(),
                             cx,
                         );

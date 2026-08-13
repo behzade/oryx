@@ -22,8 +22,7 @@ pub(super) struct QualityMetadata {
 
 #[derive(Clone, Debug)]
 pub(super) struct RowMetadata {
-    pub(super) provider_label: Option<String>,
-    pub(super) quality: Option<QualityMetadata>,
+    pub(super) quality: QualityMetadata,
 }
 
 pub(super) fn sidebar_primary_metadata(subtitle: Option<&str>, kind_label: &str) -> String {
@@ -264,13 +263,8 @@ fn render_clickable_row_secondary_metadata(
     {
         dim_parts.push(secondary_metadata.to_string());
     }
-    if let Some(metadata) = metadata {
-        if let Some(provider_label) = metadata.provider_label.as_ref() {
-            dim_parts.push(provider_label.clone());
-        }
-    }
-    let dim_text = if let Some(metadata) = metadata {
-        if metadata.quality.is_some() && !dim_parts.is_empty() {
+    let dim_text = if metadata.is_some() {
+        if !dim_parts.is_empty() {
             format!("{}  • ", dim_parts.join("  •  "))
         } else {
             dim_parts.join("  •  ")
@@ -300,7 +294,7 @@ fn render_clickable_row_secondary_metadata(
                     )
                 })
                 .when_some(
-                    metadata.and_then(|metadata| metadata.quality.as_ref()),
+                    metadata.map(|metadata| &metadata.quality),
                     |row, quality| {
                         row.child(
                             div()
@@ -368,9 +362,6 @@ pub(super) fn source_menu_row(
 }
 
 pub(super) fn render_row_metadata(metadata: &RowMetadata) -> gpui::Div {
-    let has_provider = metadata.provider_label.is_some();
-    let has_quality = metadata.quality.is_some();
-
     div()
         .min_w(px(0.))
         .max_w(px(150.))
@@ -386,34 +377,16 @@ pub(super) fn render_row_metadata(metadata: &RowMetadata) -> gpui::Div {
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_size(px(theme::SMALL_SIZE))
-                .when_some(metadata.provider_label.as_ref(), |row, provider_label| {
-                    row.child(
-                        div()
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .truncate()
-                            .child(provider_label.clone()),
-                    )
-                })
-                .when(has_provider && has_quality, |row| {
-                    row.child(
-                        div()
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child("•".to_string()),
-                    )
-                })
-                .when_some(metadata.quality.as_ref(), |row, quality| {
-                    row.child(
-                        div()
-                            .text_color(rgb(quality.color))
-                            .truncate()
-                            .child(quality.label.clone()),
-                    )
-                }),
+                .child(
+                    div()
+                        .text_color(rgb(metadata.quality.color))
+                        .truncate()
+                        .child(metadata.quality.label.clone()),
+                ),
         )
 }
 
 pub(super) fn artist_album_metadata(
-    provider: ProviderId,
     tracks: &[TrackSummary],
     collection_id: &str,
 ) -> Option<RowMetadata> {
@@ -423,23 +396,11 @@ pub(super) fn artist_album_metadata(
             .filter(|track| track.collection_id.as_deref() == Some(collection_id)),
     )
     .and_then(|summary| collection_quality_metadata(&summary));
-    metadata_label(provider, quality, provider != ProviderId::Local)
+    quality_row_metadata(quality)
 }
 
-pub(super) fn metadata_label(
-    provider: ProviderId,
-    quality: Option<QualityMetadata>,
-    show_provider: bool,
-) -> Option<RowMetadata> {
-    let provider_label = show_provider.then(|| provider.short_display_name().to_string());
-    if provider_label.is_none() && quality.is_none() {
-        None
-    } else {
-        Some(RowMetadata {
-            provider_label,
-            quality,
-        })
-    }
+pub(super) fn quality_row_metadata(quality: Option<QualityMetadata>) -> Option<RowMetadata> {
+    quality.map(|quality| RowMetadata { quality })
 }
 
 pub(super) fn quality_metadata_for_grade(grade: AudioQualityGrade) -> QualityMetadata {

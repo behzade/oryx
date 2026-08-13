@@ -28,7 +28,6 @@ use super::{
 #[derive(Clone)]
 enum ArtistTrackRow {
     AlbumHeader {
-        provider: ProviderId,
         collection_id: String,
         album: String,
         artwork_url: Option<String>,
@@ -344,7 +343,6 @@ impl OryxApp {
                         };
                         let metadata = this.track_metadata_for_collection(
                             &track,
-                            track_list.collection.reference.provider,
                             collection_quality.as_ref(),
                             cx,
                         );
@@ -588,7 +586,6 @@ impl OryxApp {
                 for index in range {
                     match grouped_rows[index].clone() {
                         ArtistTrackRow::AlbumHeader {
-                            provider,
                             collection_id,
                             album,
                             artwork_url,
@@ -659,7 +656,6 @@ impl OryxApp {
                                                 show_metadata
                                                     .then(|| {
                                                         artist_album_metadata(
-                                                            provider,
                                                             &track_list.tracks,
                                                             &collection_id,
                                                         )
@@ -721,10 +717,8 @@ impl OryxApp {
                                         candidate.collection_id.as_deref() == track.collection_id.as_deref()
                                     }),
                             );
-                            let collection_provider = track.reference.provider;
                             let metadata = this.track_metadata_for_collection(
                                 &track,
-                                collection_provider,
                                 collection_quality.as_ref(),
                                 cx,
                             );
@@ -937,12 +931,11 @@ fn artist_group_rows(track_list: &TrackList) -> Vec<ArtistTrackRow> {
         let album_key = (track.reference.provider, collection_id.clone());
 
         if current_album_key.as_ref() != Some(&album_key) {
-            if let (Some((provider, collection_id)), Some(previous_album)) = (
+            if let (Some((_, collection_id)), Some(previous_album)) = (
                 current_album_key.replace(album_key),
                 current_album_title.replace(album.clone()),
             ) {
                 rows.push(ArtistTrackRow::AlbumHeader {
-                    provider,
                     collection_id,
                     album: previous_album,
                     artwork_url: current_album_artwork.take(),
@@ -958,11 +951,8 @@ fn artist_group_rows(track_list: &TrackList) -> Vec<ArtistTrackRow> {
         current_album_tracks.push(ArtistTrackRow::Track { index, track });
     }
 
-    if let (Some((provider, collection_id)), Some(last_album)) =
-        (current_album_key, current_album_title)
-    {
+    if let (Some((_, collection_id)), Some(last_album)) = (current_album_key, current_album_title) {
         rows.push(ArtistTrackRow::AlbumHeader {
-            provider,
             collection_id,
             album: last_album,
             artwork_url: current_album_artwork,

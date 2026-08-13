@@ -21,6 +21,11 @@ const POINTS_PER_NOTE: usize = 6;
 const RADIAL_POINTS: usize = VISUALIZER_NOTES * POINTS_PER_NOTE;
 const ARC_GATE: f32 = 0.16;
 const MAX_VISIBLE_OCTAVES: usize = 3;
+const COMPACT_HEIGHT_MIN: f32 = 92.0;
+const COMPACT_HEIGHT_MAX: f32 = 132.0;
+const COMPACT_GROWTH_START: f32 = 1180.0;
+const COMPACT_GROWTH_END: f32 = 1440.0;
+const COMPACT_MINIMUM_RADIUS_RATIO: f32 = 0.28;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum VisualizerMode {
@@ -102,13 +107,14 @@ impl VisualizerView {
         }
     }
 
-    fn render_compact(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_compact(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let playback = self.playback.read(cx);
         let disabled = playback.now_playing().is_none() || playback.play_loading();
+        let viewport_width = window.viewport_size().width.to_f64() as f32;
 
         div()
             .w_full()
-            .h(px(92.))
+            .h(px(compact_visualizer_height(viewport_width)))
             .rounded(px(10.))
             .bg(rgb(theme::BG_CANVAS))
             .when(!disabled, |visualizer| visualizer.cursor_pointer())
@@ -120,7 +126,7 @@ impl VisualizerView {
                     }
                 }),
             )
-            .child(render_radial(self.displayed, self.octave_visibility).size_full())
+            .child(render_radial(self.displayed, self.octave_visibility, true).size_full())
             .into_any_element()
     }
 
@@ -188,7 +194,8 @@ impl VisualizerView {
                             .rounded(px(12.))
                             .bg(rgb(theme::SURFACE_BASE))
                             .child(
-                                render_radial(self.displayed, self.octave_visibility).size_full(),
+                                render_radial(self.displayed, self.octave_visibility, false)
+                                    .size_full(),
                             ),
                     ),
                 false,
@@ -210,19 +217,29 @@ impl Render for VisualizerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.animate(window, cx);
         match self.mode {
-            VisualizerMode::Compact => self.render_compact(cx),
+            VisualizerMode::Compact => self.render_compact(window, cx),
             VisualizerMode::Modal => self.render_modal(cx),
         }
     }
 }
 
+fn compact_visualizer_height(viewport_width: f32) -> f32 {
+    let progress = ((viewport_width - COMPACT_GROWTH_START)
+        / (COMPACT_GROWTH_END - COMPACT_GROWTH_START))
+        .clamp(0.0, 1.0);
+    COMPACT_HEIGHT_MIN + (COMPACT_HEIGHT_MAX - COMPACT_HEIGHT_MIN) * progress
+}
+
 fn render_radial(
     snapshot: VisualizerSnapshot,
     octave_visibility: [f32; VISUALIZER_OCTAVES],
+    compact: bool,
 ) -> gpui::Canvas<()> {
     canvas(
         |_bounds, _window, _cx| {},
-        move |bounds, (), window, _cx| paint_radial(bounds, snapshot, octave_visibility, window),
+        move |bounds, (), window, _cx| {
+            paint_radial(bounds, snapshot, octave_visibility, compact, window)
+        },
     )
 }
 
@@ -230,6 +247,7 @@ fn paint_radial(
     bounds: Bounds<Pixels>,
     snapshot: VisualizerSnapshot,
     octave_visibility: [f32; VISUALIZER_OCTAVES],
+    compact: bool,
     window: &mut Window,
 ) {
     let width = bounds.size.width.to_f64() as f32;
@@ -243,7 +261,11 @@ fn paint_radial(
         bounds.origin.y + px(height * 0.5),
     );
     let maximum_radius = width.min(height) * 0.47;
-    let minimum_radius = if height < 100.0 { 0.5 } else { 0.75 };
+    let minimum_radius = if compact {
+        maximum_radius * COMPACT_MINIMUM_RADIUS_RATIO
+    } else {
+        0.75
+    };
     let base_radius = amplitude_radius(minimum_radius, maximum_radius, snapshot.level);
 
     // Paint low octaves first so higher, redder bands win where fills overlap.
@@ -264,7 +286,7 @@ fn paint_radial(
         }
     }
 
-    let circle_stroke = if height < 100.0 { px(1.0) } else { px(1.5) };
+    let circle_stroke = if compact { px(1.0) } else { px(1.5) };
     let circle_bounds = Bounds::new(
         point(center.x - px(base_radius), center.y - px(base_radius)),
         size(px(base_radius * 2.0), px(base_radius * 2.0)),
@@ -421,6 +443,28 @@ fn octave_color(octave: usize) -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_visualizer_grows_on_wide_windows() {
+        assert_eq!(compact_visualizer_height(960.0), COMPACT_HEIGHT_MIN);
+        assert_eq!(compact_visualizer_height(1180.0), COMPACT_HEIGHT_MIN);
+        assert_eq!(compact_visualizer_height(1310.0), 112.0);
+        assert_eq!(compact_visualizer_height(1440.0), COMPACT_HEIGHT_MAX);
+        assert_eq!(compact_visualizer_height(2048.0), COMPACT_HEIGHT_MAX);
+    }
+
+    #[test]
+    fn compact_visualizer_keeps_a_visible_quiet_radius() {
+        let maximum_radius = COMPACT_HEIGHT_MAX * 0.47;
+        let minimum_radius = maximum_radius * COMPACT_MINIMUM_RADIUS_RATIO;
+
+        assert!(minimum_radius > 17.0);
+        assert_eq!(
+            amplitude_radius(minimum_radius, maximum_radius, 0.0),
+            minimum_radius
+        );
+        assert!(amplitude_radius(minimum_radius, maximum_radius, 1.0) > minimum_radius);
+    }
 
     #[test]
     fn octave_colors_run_from_low_blue_to_high_red() {

@@ -35,8 +35,7 @@ impl OryxApp {
         let search_nonce = self
             .discover
             .update(cx, |discover, _cx| discover.begin_search());
-        let source_label = self.discover.read(cx).active_source_label(&self.providers);
-        self.status_message = Some(format!("Searching {} for '{query}'", source_label));
+        self.status_message = Some(format!("Searching for '{query}'"));
         self.persist_session_snapshot(cx);
         cx.notify();
 
@@ -96,10 +95,7 @@ impl OryxApp {
             discover.begin_collection_load(collection_key.clone())
         });
         let Some(provider) = self.provider_for_id(collection.provider) else {
-            self.status_message = Some(format!(
-                "Provider '{}' is not available.",
-                collection.provider
-            ));
+            self.status_message = Some("The selected source is not available.".to_string());
             cx.notify();
             return;
         };
@@ -233,10 +229,7 @@ impl OryxApp {
         };
 
         let Some(provider) = self.provider_for_id(track_list.collection.reference.provider) else {
-            self.status_message = Some(format!(
-                "Provider '{}' is not available.",
-                track_list.collection.reference.provider
-            ));
+            self.status_message = Some("The selected source is not available.".to_string());
             cx.notify();
             return;
         };
