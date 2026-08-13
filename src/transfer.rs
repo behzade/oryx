@@ -74,6 +74,7 @@ pub enum TransferEvent {
         download_id: String,
         title: String,
         source_url: String,
+        destination: Option<PathBuf>,
         progress: ProgressiveDownload,
     },
     ExternalDownloadStarted {
@@ -248,6 +249,7 @@ impl TransferManager {
             download_id: download_id.clone(),
             title: queued_title,
             source_url: source_url.clone(),
+            destination: preferred_destination.clone(),
             progress: progress.clone(),
         });
 
@@ -255,7 +257,7 @@ impl TransferManager {
             .name("transfer-open-url-download".to_string())
             .spawn(move || {
                 let mut resolved_title = fallback_title_for_url(&source_url);
-                let mut destination = None;
+                let mut destination = preferred_destination.clone();
 
                 let result = (|| -> anyhow::Result<()> {
                     progress.wait_if_paused()?;

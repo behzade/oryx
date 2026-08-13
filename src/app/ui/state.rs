@@ -68,6 +68,7 @@ enum ImportReviewState {
 pub(in crate::app) struct UiState {
     primary_overlay: PrimaryOverlay,
     downloads_modal_open: bool,
+    visualizer_modal_open: bool,
     contextual_surface: Option<ContextualSurface>,
     import_review: ImportReviewState,
 }
@@ -81,12 +82,14 @@ impl UiState {
         self.dismiss_contextual_surfaces();
         self.primary_overlay = PrimaryOverlay::None;
         self.downloads_modal_open = false;
+        self.visualizer_modal_open = false;
     }
 
     pub(in crate::app) fn new() -> Self {
         Self {
             primary_overlay: PrimaryOverlay::None,
             downloads_modal_open: false,
+            visualizer_modal_open: false,
             contextual_surface: None,
             import_review: ImportReviewState::Idle,
         }
@@ -105,6 +108,10 @@ impl UiState {
 
     pub(in crate::app) fn downloads_modal_open(&self) -> bool {
         self.downloads_modal_open
+    }
+
+    pub(in crate::app) fn visualizer_modal_open(&self) -> bool {
+        self.visualizer_modal_open
     }
 
     pub(in crate::app) fn open_url_prompt_open(&self) -> bool {
@@ -266,17 +273,34 @@ impl UiState {
 
     pub(in crate::app) fn toggle_downloads_modal(&mut self) {
         self.dismiss_contextual_surfaces();
+        self.visualizer_modal_open = false;
         self.downloads_modal_open = !self.downloads_modal_open;
     }
 
     pub(in crate::app) fn open_downloads_modal(&mut self) {
         self.dismiss_contextual_surfaces();
+        self.visualizer_modal_open = false;
         self.downloads_modal_open = true;
     }
 
     pub(in crate::app) fn close_downloads_modal(&mut self) -> bool {
         if self.downloads_modal_open {
             self.downloads_modal_open = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(in crate::app) fn open_visualizer_modal(&mut self) {
+        self.dismiss_contextual_surfaces();
+        self.downloads_modal_open = false;
+        self.visualizer_modal_open = true;
+    }
+
+    pub(in crate::app) fn close_visualizer_modal(&mut self) -> bool {
+        if self.visualizer_modal_open {
+            self.visualizer_modal_open = false;
             true
         } else {
             false

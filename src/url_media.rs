@@ -173,13 +173,6 @@ pub(crate) fn download_video_to_path(
     fs::create_dir_all(parent)
         .with_context(|| format!("Failed to create parent directory {}", parent.display()))?;
 
-    if destination.is_file() && !request.supports_byte_ranges {
-        if let Some(progress) = progress {
-            progress.finish(downloaded_file_len(destination)?);
-        }
-        return Ok(());
-    }
-
     let download_result = download_to_partial_path(
         request,
         destination,
@@ -465,6 +458,12 @@ fn download_attempt(
             return Ok(DownloadResult { total_bytes });
         }
     };
+    if resume_from == 0
+        && existing_len > 0
+        && let Some(progress) = progress
+    {
+        progress.restart_from_zero();
+    }
     let expected_total = expected_total_bytes(&response, resume_from);
     if let Some(progress) = progress {
         progress.set_total_bytes(expected_total);
@@ -512,6 +511,9 @@ fn download_hls_stream_to_partial_path(
     destination: &Path,
     progress: Option<&ProgressiveDownload>,
 ) -> Result<DownloadResult> {
+    if let Some(progress) = progress {
+        progress.restart_from_zero();
+    }
     let master_playlist = fetch_text_response(request)?;
     let media_playlist_url = resolve_hls_media_playlist_url(request, &master_playlist)?;
     let media_playlist = if media_playlist_url == request.url {
@@ -638,20 +640,22 @@ fn open_download_response(
     let status = response.status();
 
     if existing_len > 0 {
-        if request.supports_byte_ranges {
-            if status != 206 {
-                anyhow::bail!(
-                    "Server did not honor byte-range resume request for {} (status {status})",
-                    request.url
-                );
-            }
-            return Ok(DownloadResponse::Stream(response, existing_len));
-        }
-
-        return Ok(DownloadResponse::Stream(response, 0));
+        // Some hosts advertise or appear to support ranges but ignore a later Range request.
+        // Keep the chosen path and replace its partial data instead of creating a second file.
+        let resume_from =
+            response_resume_offset(existing_len, request.supports_byte_ranges, status);
+        return Ok(DownloadResponse::Stream(response, resume_from));
     }
 
     Ok(DownloadResponse::Stream(response, 0))
+}
+
+fn response_resume_offset(existing_len: u64, supports_byte_ranges: bool, status: u16) -> u64 {
+    if existing_len > 0 && supports_byte_ranges && status == 206 {
+        existing_len
+    } else {
+        0
+    }
 }
 
 fn resumable_download_len(destination: &Path, supports_byte_ranges: bool) -> Result<u64> {
@@ -773,9 +777,20 @@ fn resolve_hls_url(base_url: &str, uri: &str) -> Result<String> {
 }
 
 fn should_retry_partial_download(error: &anyhow::Error) -> bool {
-    error
-        .chain()
-        .any(|cause| is_retryable_download_error_message(cause))
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<ureq::Error>()
+            .is_some_and(is_retryable_http_error)
+            || is_retryable_download_error_message(cause)
+    })
+}
+
+fn is_retryable_http_error(error: &ureq::Error) -> bool {
+    matches!(error, ureq::Error::Status(status, _) if is_retryable_http_status(*status))
+}
+
+fn is_retryable_http_status(status: u16) -> bool {
+    matches!(status, 408 | 425 | 429 | 500..=599)
 }
 
 fn is_retryable_download_error_message(message: &dyn std::fmt::Display) -> bool {
@@ -814,12 +829,6 @@ impl DownloadRetryPolicy {
         let _ = attempt;
         matches!(self, Self::Infinite)
     }
-}
-
-fn downloaded_file_len(path: &Path) -> Result<u64> {
-    Ok(fs::metadata(path)
-        .with_context(|| format!("Failed to read downloaded file metadata {}", path.display()))?
-        .len())
 }
 
 fn yt_dlp_binary() -> Option<&'static PathBuf> {
@@ -1026,5 +1035,21 @@ mod tests {
         );
 
         assert!(should_retry_partial_download(&error));
+    }
+
+    #[test]
+    fn classifies_only_transient_http_statuses_as_retryable() {
+        for status in [408, 425, 429, 500, 503, 599] {
+            assert!(is_retryable_http_status(status), "status {status}");
+        }
+        for status in [400, 401, 403, 404, 416] {
+            assert!(!is_retryable_http_status(status), "status {status}");
+        }
+    }
+
+    #[test]
+    fn ignored_range_request_restarts_in_the_same_file() {
+        assert_eq!(response_resume_offset(512, true, 200), 0);
+        assert_eq!(response_resume_offset(512, true, 206), 512);
     }
 }

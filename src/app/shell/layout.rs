@@ -28,7 +28,7 @@ impl OryxApp {
             .child(browse::section_divider())
             .child(self.render_lists(window, cx))
             .child(browse::section_divider())
-            .child(self.render_now_playing(cx))
+            .child(self.render_now_playing(window, cx))
     }
 }
 

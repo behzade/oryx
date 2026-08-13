@@ -11,6 +11,7 @@ use souvlaki::{MediaControls, MediaPlayback, MediaPosition};
 
 use super::clock::PlaybackClock;
 use super::media;
+use super::visualizer::{AudioVisualizer, VisualizerSource};
 use super::{
     MediaSessionTrack, PlaybackCommand, PlaybackRuntimeStatus, PlaybackSource, PlaybackState,
 };
@@ -25,6 +26,7 @@ struct PlaybackBackend {
     current: Option<CurrentPlayback>,
     last_default_output: Option<OutputDeviceSnapshot>,
     route_changed_since_rebuild: bool,
+    visualizer: AudioVisualizer,
 }
 
 #[derive(Clone)]
@@ -45,6 +47,7 @@ const OUTPUT_ROUTE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) fn playback_worker(
     rx: Receiver<PlaybackCommand>,
     media_controls: Option<MediaControls>,
+    visualizer: AudioVisualizer,
 ) {
     let mut backend: Option<PlaybackBackend> = None;
     let mut media_controls = media_controls;
@@ -71,7 +74,14 @@ pub(super) fn playback_worker(
                 position,
                 done,
             } => {
-                let result = play_song(&mut backend, &mut media_controls, track, source, position);
+                let result = play_song(
+                    &mut backend,
+                    &mut media_controls,
+                    track,
+                    source,
+                    position,
+                    visualizer.clone(),
+                );
                 let _ = done.send(result);
             }
             PlaybackCommand::Pause { done } => {
@@ -93,7 +103,7 @@ pub(super) fn playback_worker(
                 let _ = done.send(runtime_status(&mut backend));
             }
             PlaybackCommand::Warm { done } => {
-                let result = warm_output(&mut backend, &mut media_controls);
+                let result = warm_output(&mut backend, &mut media_controls, visualizer.clone());
                 let _ = done.send(result);
             }
             PlaybackCommand::SeekTo { position, done } => {
@@ -140,8 +150,9 @@ fn play_song(
     track: MediaSessionTrack,
     source: PlaybackSource,
     position: Option<Duration>,
+    visualizer: AudioVisualizer,
 ) -> Result<()> {
-    let backend = ensure_backend(backend, media_controls.take())?;
+    let backend = ensure_backend(backend, media_controls.take(), visualizer)?;
     observe_output_route(backend);
     // macOS/CoreAudio route changes can leave a rodio/CPAL output stream silently stale without
     // emitting StreamInvalidated/DeviceNotAvailable. In the reproduced Bluetooth cases:
@@ -163,7 +174,7 @@ fn play_song(
         current_player.stop();
     }
 
-    let player = build_player(&backend.sink, &source, position)?;
+    let player = build_player(&backend.sink, &source, position, &backend.visualizer)?;
     backend.player = Some(player);
     let position = position.unwrap_or(Duration::ZERO);
     backend.clock.start(position);
@@ -265,6 +276,7 @@ fn stop_playback(
         player.stop();
     }
     backend.clock.stop();
+    backend.visualizer.clear();
     backend.current = None;
     backend.needs_rebuild = false;
     backend.route_changed_since_rebuild = false;
@@ -276,6 +288,7 @@ fn stop_playback(
 fn ensure_backend(
     backend: &mut Option<PlaybackBackend>,
     media_controls: Option<MediaControls>,
+    visualizer: AudioVisualizer,
 ) -> Result<&mut PlaybackBackend> {
     if backend.is_none() {
         let (mut sink, stream_errors, _sink_output) = open_output_sink()?;
@@ -290,6 +303,7 @@ fn ensure_backend(
             current: None,
             last_default_output: current_default_output_device(),
             route_changed_since_rebuild: false,
+            visualizer,
         });
     } else if let Some(media_controls) = media_controls {
         backend
@@ -362,8 +376,9 @@ fn runtime_status(backend: &mut Option<PlaybackBackend>) -> Result<PlaybackRunti
 fn warm_output(
     backend: &mut Option<PlaybackBackend>,
     media_controls: &mut Option<MediaControls>,
+    visualizer: AudioVisualizer,
 ) -> Result<()> {
-    let backend = ensure_backend(backend, media_controls.take())?;
+    let backend = ensure_backend(backend, media_controls.take(), visualizer)?;
     rebuild_output_if_needed(backend)?;
     Ok(())
 }
@@ -393,7 +408,12 @@ fn seek_to_position(
         player.stop();
     }
 
-    let player = build_player(&backend.sink, &current.source, Some(position))?;
+    let player = build_player(
+        &backend.sink,
+        &current.source,
+        Some(position),
+        &backend.visualizer,
+    )?;
     backend.player = Some(player);
     backend.clock.start(position);
     backend.needs_rebuild = false;
@@ -448,7 +468,12 @@ fn restart_current_playback(
         player.stop();
     }
 
-    let player = build_player(&backend.sink, &current.source, Some(Duration::ZERO))?;
+    let player = build_player(
+        &backend.sink,
+        &current.source,
+        Some(Duration::ZERO),
+        &backend.visualizer,
+    )?;
     backend.player = Some(player);
     backend.clock.start(Duration::ZERO);
     backend.needs_rebuild = false;
@@ -630,6 +655,7 @@ fn build_player(
     sink: &MixerDeviceSink,
     source: &PlaybackSource,
     position: Option<Duration>,
+    visualizer: &AudioVisualizer,
 ) -> Result<Player> {
     let player = Player::connect_new(sink.mixer());
     match source {
@@ -641,7 +667,7 @@ fn build_player(
                 format!("Failed to decode local audio file {}", audio_path.display())
             })?;
             seek_source_to(&mut decoder, position, audio_path)?;
-            player.append(decoder);
+            player.append(VisualizerSource::new(decoder, visualizer.clone()));
         }
         PlaybackSource::GrowingFile {
             path,
@@ -657,7 +683,7 @@ fn build_player(
                 format!("Failed to decode progressive audio file {}", path.display())
             })?;
             seek_source_to(&mut decoder, position, path)?;
-            player.append(decoder);
+            player.append(VisualizerSource::new(decoder, visualizer.clone()));
         }
     }
     player.play();
@@ -724,7 +750,12 @@ fn rebuild_output_if_needed(backend: &mut PlaybackBackend) -> Result<()> {
         return Ok(());
     };
 
-    let player = build_player(&backend.sink, &current.source, Some(position))?;
+    let player = build_player(
+        &backend.sink,
+        &current.source,
+        Some(position),
+        &backend.visualizer,
+    )?;
     backend.player = Some(player);
     backend.clock.start(position);
     match current.playback {

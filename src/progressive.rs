@@ -78,6 +78,17 @@ impl ProgressiveDownload {
         self.inner.wake.notify_all();
     }
 
+    pub fn restart_from_zero(&self) {
+        let mut state = self.inner.state.lock().expect("progressive state poisoned");
+        if state.cancelled || state.complete || state.failure.is_some() {
+            return;
+        }
+        state.available_len = 0;
+        state.total_len = None;
+        state.retrying = false;
+        self.inner.wake.notify_all();
+    }
+
     pub fn set_total_bytes(&self, total_len: Option<u64>) {
         let mut state = self.inner.state.lock().expect("progressive state poisoned");
         if state.cancelled {
@@ -460,5 +471,19 @@ mod tests {
 
         download.resume();
         assert!(!download.snapshot().paused);
+    }
+
+    #[test]
+    fn restart_from_zero_clears_partial_progress() {
+        let download = ProgressiveDownload::new();
+        download.set_total_bytes(Some(10));
+        download.report_progress(6);
+
+        download.restart_from_zero();
+
+        let snapshot = download.snapshot();
+        assert_eq!(snapshot.downloaded_bytes, 0);
+        assert_eq!(snapshot.total_bytes, None);
+        assert!(!snapshot.complete);
     }
 }

@@ -42,7 +42,11 @@ impl OryxApp {
         }
 
         if !event.keystroke.modifiers.function && event.keystroke.key.as_str() == "escape" {
-            self.close_downloads_modal(cx);
+            if self.ui_state.read(cx).visualizer_modal_open() {
+                self.close_visualizer_modal(cx);
+            } else {
+                self.close_downloads_modal(cx);
+            }
             return;
         }
 

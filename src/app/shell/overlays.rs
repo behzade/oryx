@@ -18,6 +18,9 @@ impl OryxApp {
             .when(self.ui_state.read(cx).downloads_modal_open(), |shell| {
                 shell.child(self.render_downloads_modal(cx))
             })
+            .when(self.ui_state.read(cx).visualizer_modal_open(), |shell| {
+                shell.child(self.render_visualizer_modal(cx))
+            })
             .when(self.ui_state.read(cx).open_url_prompt_open(), |shell| {
                 shell.child(self.render_open_url_overlay(window, cx))
             })

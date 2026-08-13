@@ -33,6 +33,7 @@ pub(super) struct DownloadItem {
 pub(super) enum DownloadItemState {
     Queued {
         source_url: String,
+        destination: Option<PathBuf>,
         progress: ProgressiveDownload,
     },
     Active {
@@ -205,6 +206,7 @@ impl TransferStateModel {
                 download_id,
                 title,
                 source_url,
+                destination,
                 progress,
             } => {
                 self.upsert_external_download(ExternalDownloadItem {
@@ -212,6 +214,7 @@ impl TransferStateModel {
                     title: title.clone(),
                     state: DownloadItemState::Queued {
                         source_url: source_url.clone(),
+                        destination: destination.clone(),
                         progress: progress.clone(),
                     },
                 });
@@ -482,7 +485,7 @@ impl ExternalDownloadItem {
 
     fn destination(&self) -> Option<&PathBuf> {
         match &self.state {
-            DownloadItemState::Queued { .. } => None,
+            DownloadItemState::Queued { destination, .. } => destination.as_ref(),
             DownloadItemState::Active { destination, .. } => destination.as_ref(),
             DownloadItemState::Completed { destination, .. } => Some(destination),
             DownloadItemState::Failed { destination, .. } => destination.as_ref(),
@@ -515,6 +518,7 @@ mod tests {
                     title: "Queued".to_string(),
                     state: DownloadItemState::Queued {
                         source_url: "https://example.com/queued".to_string(),
+                        destination: Some(PathBuf::from("/tmp/queued.mp4")),
                         progress: queued_progress,
                     },
                 },
@@ -557,7 +561,10 @@ mod tests {
             PersistedExternalDownloadState::Pending
         ));
         assert_eq!(persisted[0].source_url, "https://example.com/queued");
-        assert_eq!(persisted[0].destination, None);
+        assert_eq!(
+            persisted[0].destination.as_deref(),
+            Some(PathBuf::from("/tmp/queued.mp4").as_path())
+        );
         assert!(!persisted[0].paused);
         assert!(matches!(
             persisted[1].state,

@@ -1,5 +1,6 @@
 mod clock;
 mod media;
+mod visualizer;
 mod worker;
 
 use std::ffi::c_void;
@@ -12,6 +13,8 @@ use anyhow::{Context, Result};
 use souvlaki::MediaControlEvent;
 
 use crate::progressive::ProgressiveDownload;
+
+pub use visualizer::{AudioVisualizer, VISUALIZER_BUCKETS};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlaybackState {
@@ -31,6 +34,7 @@ pub struct PlaybackRuntimeStatus {
 #[derive(Clone)]
 pub struct PlaybackController {
     tx: Sender<PlaybackCommand>,
+    visualizer: AudioVisualizer,
 }
 
 #[derive(Clone, Debug)]
@@ -57,13 +61,19 @@ impl PlaybackController {
         let (tx, rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let media_controls = media::init_media_controls(event_tx, media_controls_hwnd);
+        let visualizer = AudioVisualizer::default();
+        let worker_visualizer = visualizer.clone();
 
         thread::Builder::new()
             .name("audio-playback".to_string())
-            .spawn(move || worker::playback_worker(rx, media_controls))
+            .spawn(move || worker::playback_worker(rx, media_controls, worker_visualizer))
             .expect("failed to spawn audio playback worker");
 
-        (Self { tx }, event_rx)
+        (Self { tx, visualizer }, event_rx)
+    }
+
+    pub fn visualizer_snapshot(&self) -> [f32; VISUALIZER_BUCKETS] {
+        self.visualizer.snapshot()
     }
 
     pub fn play_source_at(
