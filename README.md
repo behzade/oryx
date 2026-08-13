@@ -4,6 +4,8 @@ Native Rust music player built with `gpui`.
 
 Oryx plays local files and can search remote sources through user-installed TOML provider files. This repository does not ship provider files.
 
+![Oryx artist library and playback view](assets/screenshot.png)
+
 ## Requirements
 
 - The Rust toolchain in `rust-toolchain.toml`
