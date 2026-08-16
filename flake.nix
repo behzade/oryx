@@ -51,6 +51,10 @@
             cargoHash = "sha256-rSNBn8CkqJN52ApHjhH6wJpy23DLv5BSN/rjWZrl5mk=";
             doCheck = false;
           };
+          appleXcrun = pkgs.writeShellScriptBin "xcrun" ''
+            unset DEVELOPER_DIR SDKROOT
+            exec /usr/bin/xcrun "$@"
+          '';
           linuxBuildInputs = lib.optionals pkgs.stdenv.isLinux [
             pkgs.alsa-lib
             pkgs.dbus
@@ -86,6 +90,9 @@
             LD_LIBRARY_PATH = lib.makeLibraryPath linuxBuildInputs;
 
             shellHook = ''
+              ${lib.optionalString pkgs.stdenv.isDarwin ''
+                export PATH="${appleXcrun}/bin:$PATH"
+              ''}
               echo "Oryx dev shell: $(rustc --version)"
               echo "Run 'make help' to list common commands."
             '';

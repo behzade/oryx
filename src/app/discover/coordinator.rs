@@ -5,6 +5,7 @@ use gpui::{AsyncApp, Context};
 
 use crate::provider::{
     CollectionKind, CollectionRef, CollectionSummary, SearchResult, SharedProvider, TrackList,
+    TrackSummary,
 };
 
 use super::super::ui::NotificationLevel;
@@ -51,13 +52,13 @@ impl OryxApp {
                     return;
                 }
                 match result {
-                    Ok((query, results)) => {
-                        let result_count = results.len();
+                    Ok((query, collections, tracks)) => {
+                        let result_count = collections.len() + tracks.len();
                         this.discover.update(cx, |discover, _cx| {
-                            discover.finish_search(results);
+                            discover.finish_search(collections, tracks);
                         });
                         this.status_message = Some(match result_count {
-                            0 => format!("No albums or playlists found for '{query}'."),
+                            0 => format!("No results found for '{query}'."),
                             count => format!("Found {count} result(s) for '{query}'."),
                         });
                         this.persist_session_snapshot(cx);
@@ -67,6 +68,8 @@ impl OryxApp {
                         this.discover.update(cx, |discover, _cx| {
                             discover.fail_search();
                         });
+                        let error = format!("{error:#}");
+                        eprintln!("search failed: {error}");
                         let message = format!("Search failed: {error}");
                         this.status_message = Some(message.clone());
                         this.show_notification(message, NotificationLevel::Error, cx);
@@ -76,6 +79,45 @@ impl OryxApp {
             });
         })
         .detach();
+    }
+
+    pub(in crate::app) fn play_search_track(
+        &mut self,
+        selected_track: TrackSummary,
+        cx: &mut Context<Self>,
+    ) {
+        let provider = selected_track.reference.provider;
+        let tracks = self
+            .discover
+            .read(cx)
+            .track_search_results()
+            .into_iter()
+            .filter(|track| track.reference.provider == provider)
+            .collect::<Vec<_>>();
+        let Some(index) = tracks.iter().position(|track| {
+            track.reference.provider == selected_track.reference.provider
+                && track.reference.id == selected_track.reference.id
+        }) else {
+            return;
+        };
+        let query = self.query_input.content().trim().to_string();
+        let context = TrackList {
+            collection: CollectionSummary {
+                reference: CollectionRef::new(
+                    provider,
+                    format!("search:{query}"),
+                    CollectionKind::Playlist,
+                    None,
+                ),
+                title: format!("Search: {query}"),
+                subtitle: Some(provider.display_name().to_string()),
+                artwork_url: None,
+                track_count: Some(tracks.len()),
+            },
+            tracks,
+        };
+
+        self.start_playback_for_context(context, index, None, cx);
     }
 
     pub(in crate::app) fn load_collection(
@@ -282,22 +324,26 @@ impl OryxApp {
 async fn search_collections(
     providers: Vec<SharedProvider>,
     query: String,
-) -> Result<(String, Vec<CollectionSummary>)> {
+) -> Result<(String, Vec<CollectionSummary>, Vec<TrackSummary>)> {
     let mut collections = Vec::new();
+    let mut tracks = Vec::new();
 
     for provider in providers {
         let results = provider.search(&query).await?;
-        collections.extend(results.into_iter().filter_map(|result| match result {
-            SearchResult::Collection(collection)
-                if matches!(
-                    collection.reference.kind,
-                    CollectionKind::Album | CollectionKind::Playlist
-                ) =>
-            {
-                Some(collection)
+        for result in results {
+            match result {
+                SearchResult::Collection(collection)
+                    if matches!(
+                        collection.reference.kind,
+                        CollectionKind::Album | CollectionKind::Playlist
+                    ) =>
+                {
+                    collections.push(collection);
+                }
+                SearchResult::Track(track) => tracks.push(track),
+                SearchResult::Collection(_) => {}
             }
-            SearchResult::Collection(_) | SearchResult::Track(_) => None,
-        }));
+        }
     }
 
     collections.sort_by(|left, right| {
@@ -312,7 +358,19 @@ async fn search_collections(
             })
     });
 
-    Ok((query, collections))
+    tracks.sort_by(|left, right| {
+        rank_track(right, &query)
+            .cmp(&rank_track(left, &query))
+            .then_with(|| left.title.to_lowercase().cmp(&right.title.to_lowercase()))
+            .then_with(|| {
+                left.reference
+                    .provider
+                    .as_str()
+                    .cmp(right.reference.provider.as_str())
+            })
+    });
+
+    Ok((query, collections, tracks))
 }
 
 fn hydrate_collection_batch_artwork(
@@ -384,6 +442,33 @@ fn rank_collection(collection: &CollectionSummary, query: &str) -> i32 {
     };
 
     score += collection.track_count.unwrap_or(0).min(99) as i32;
+    score
+}
+
+fn rank_track(track: &TrackSummary, query: &str) -> i32 {
+    let normalized_query = query.trim().to_ascii_lowercase();
+    let normalized_title = track.title.to_ascii_lowercase();
+    let normalized_artist = track.artist.as_deref().unwrap_or("").to_ascii_lowercase();
+    let mut score = track.reference.provider.search_rank_bias();
+
+    if normalized_title == normalized_query {
+        score += 500;
+    } else if normalized_title.contains(&normalized_query) {
+        score += 250;
+    }
+
+    if !normalized_query.is_empty()
+        && normalized_query
+            .split_whitespace()
+            .all(|term| normalized_title.contains(term) || normalized_artist.contains(term))
+    {
+        score += 120;
+    }
+
+    if normalized_artist.contains(&normalized_query) {
+        score += 60;
+    }
+
     score
 }
 

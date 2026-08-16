@@ -424,6 +424,12 @@ impl OryxApp {
         self.transfer_state.read(cx).track_is_downloading(track)
     }
 
+    pub(in crate::app) fn track_download_allowed(&self, track: &TrackSummary) -> bool {
+        self.provider_for_id(track.reference.provider)
+            .map(|provider| provider.allows_download(track))
+            .unwrap_or(false)
+    }
+
     pub(in crate::app) fn track_is_liked(&self, track: &TrackSummary, cx: &App) -> bool {
         self.library_catalog.read(cx).track_is_liked(track)
     }

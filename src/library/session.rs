@@ -21,6 +21,8 @@ pub struct SessionSnapshot {
     #[serde(default)]
     pub browse_mode: BrowseMode,
     pub search_results: Vec<CollectionSummary>,
+    #[serde(default)]
+    pub track_search_results: Vec<TrackSummary>,
     #[serde(default, alias = "selected_collection_id")]
     pub browser_collection_id: Option<String>,
     #[serde(default, alias = "track_list")]

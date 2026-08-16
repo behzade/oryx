@@ -324,7 +324,8 @@ impl OryxApp {
                             active_download.as_ref().map(|download| download.purpose),
                             Some(DownloadPurpose::Explicit)
                         );
-                        let show_download_action = !is_cached
+                        let show_download_action = this.track_download_allowed(&track)
+                            && !is_cached
                             && !matches!(
                                 active_download.as_ref().map(|download| download.purpose),
                                 Some(DownloadPurpose::PlaybackPrefetch)
@@ -700,7 +701,8 @@ impl OryxApp {
                                 active_download.as_ref().map(|download| download.purpose),
                                 Some(DownloadPurpose::Explicit)
                             );
-                            let show_download_action = !is_cached
+                            let show_download_action = this.track_download_allowed(&track)
+                                && !is_cached
                                 && !matches!(
                                     active_download.as_ref().map(|download| download.purpose),
                                     Some(DownloadPurpose::PlaybackPrefetch)

@@ -265,6 +265,117 @@ pub(super) fn prepare_track_for_playback(
     })
 }
 
+pub(super) fn prepare_session_track_for_playback(
+    library: &Library,
+    provider: &dyn MusicProvider,
+    selected_track: &TrackSummary,
+    song: &SongData,
+    position: Option<Duration>,
+) -> Result<PreparedPlaybackTrack> {
+    let cached_track = resolved_track_for_cache(selected_track, &song.track);
+    let audio_request = DownloadRequest::from_stream(&song.stream);
+    let session_dir = library
+        .session_cache_root()
+        .join(cached_track.reference.provider.as_str())
+        .join(short_stable_suffix(&(
+            cached_track.reference.provider.as_str(),
+            &cached_track.reference.id,
+        )));
+    fs::create_dir_all(&session_dir).with_context(|| {
+        format!(
+            "Failed to create session cache directory at {}",
+            session_dir.display()
+        )
+    })?;
+    let audio_path = session_audio_path(&session_dir, &cached_track, &audio_request);
+    let artwork_path = ensure_track_artwork_cached(provider, &cached_track, &session_dir)?;
+
+    if cached_audio_file_is_valid(&audio_path, cached_track.duration_seconds) {
+        let (bitrate_bps, audio_format) =
+            read_audio_quality(&audio_path, cached_track.duration_seconds)?;
+        return Ok(PreparedPlaybackTrack {
+            source: PlaybackSource::LocalFile(audio_path.clone()),
+            display_path: audio_path,
+            artwork_path,
+            bitrate_bps,
+            audio_format,
+            fully_cached: true,
+            cache_changed: false,
+            cache_monitor: None,
+        });
+    }
+
+    if position.unwrap_or_default().is_zero() {
+        let temp_path = temporary_download_path(&audio_path);
+        let download = ProgressiveDownload::new();
+        let request = audio_request.clone();
+        let thread_temp_path = temp_path.clone();
+        let thread_audio_path = audio_path.clone();
+        let download_for_thread = download.clone();
+        let title = cached_track.title.clone();
+        let expected_duration = cached_track.duration_seconds;
+
+        thread::Builder::new()
+            .name("audio-session-progressive".to_string())
+            .spawn(move || {
+                if let Err(error) = complete_session_progressive_download(
+                    request,
+                    thread_temp_path,
+                    thread_audio_path,
+                    expected_duration,
+                    download_for_thread.clone(),
+                ) {
+                    let error_message = format!("{error:#}");
+                    eprintln!(
+                        "session audio download failed for '{}': {error_message}",
+                        title
+                    );
+                    download_for_thread.fail(error_message);
+                }
+            })
+            .context("Failed to spawn session audio download worker")?;
+
+        download
+            .wait_for_buffer(INITIAL_PLAYBACK_BUFFER)
+            .context("Session playback buffer did not become ready")?;
+
+        return Ok(PreparedPlaybackTrack {
+            source: PlaybackSource::GrowingFile {
+                path: temp_path,
+                final_path: audio_path.clone(),
+                download,
+            },
+            display_path: audio_path,
+            artwork_path,
+            bitrate_bps: None,
+            audio_format: None,
+            fully_cached: false,
+            cache_changed: false,
+            cache_monitor: None,
+        });
+    }
+
+    download_audio_to_path(
+        &audio_request,
+        &audio_path,
+        None,
+        cached_track.duration_seconds,
+        DownloadRetryPolicy::Bounded(DOWNLOAD_RETRY_LIMIT),
+    )?;
+    let (bitrate_bps, audio_format) =
+        read_audio_quality(&audio_path, cached_track.duration_seconds)?;
+    Ok(PreparedPlaybackTrack {
+        source: PlaybackSource::LocalFile(audio_path.clone()),
+        display_path: audio_path,
+        artwork_path,
+        bitrate_bps,
+        audio_format,
+        fully_cached: true,
+        cache_changed: false,
+        cache_monitor: None,
+    })
+}
+
 pub(super) fn prepare_cached_track_for_playback(
     library: &Library,
     selected_track: &TrackSummary,
@@ -1111,6 +1222,17 @@ fn resolve_audio_path(
     Ok(album_dir.join(format!("{base_name} [{suffix}].{extension}")))
 }
 
+fn session_audio_path(
+    session_dir: &Path,
+    track: &TrackSummary,
+    request: &DownloadRequest,
+) -> PathBuf {
+    let extension = extension_for_download(request).unwrap_or("mp3");
+    let base_name = sanitize_path_component(&track.title);
+    let suffix = short_stable_suffix(&(track.reference.provider.as_str(), &track.reference.id));
+    session_dir.join(format!("{base_name} [{suffix}].{extension}"))
+}
+
 fn resolve_artwork_path(album_dir: &Path, request: &DownloadRequest) -> PathBuf {
     let extension = extension_for_download(request).unwrap_or("jpg");
     album_dir.join(format!("cover.{extension}"))
@@ -1231,6 +1353,49 @@ fn complete_progressive_download(
 
         download.finish(download_result.total_bytes);
 
+        Ok(())
+    })
+}
+
+fn complete_session_progressive_download(
+    request: DownloadRequest,
+    temp_path: PathBuf,
+    destination: PathBuf,
+    expected_duration_seconds: Option<u32>,
+    download: ProgressiveDownload,
+) -> Result<()> {
+    with_download_path_lock(&destination, || {
+        if cached_audio_file_is_valid(&destination, expected_duration_seconds) {
+            download.finish(downloaded_file_len(&destination)?);
+            return Ok(());
+        }
+
+        let result = match download_to_partial_path(
+            &request,
+            &temp_path,
+            Some(&download),
+            DownloadRetryPolicy::Infinite,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = fs::remove_file(&temp_path);
+                return Err(error);
+            }
+        };
+        if let Err(error) =
+            validate_downloaded_audio_file(&temp_path, &result, expected_duration_seconds)
+        {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+        fs::rename(&temp_path, &destination).with_context(|| {
+            format!(
+                "Failed to move downloaded file from {} to {}",
+                temp_path.display(),
+                destination.display()
+            )
+        })?;
+        download.finish(result.total_bytes);
         Ok(())
     })
 }

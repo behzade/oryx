@@ -302,6 +302,7 @@ impl OryxApp {
             DiscoverModule::new(
                 enabled_search_providers.clone(),
                 restored.search_results.clone(),
+                restored.track_search_results.clone(),
                 restored.selected_collection_id.clone(),
                 restored.track_list.clone(),
             )

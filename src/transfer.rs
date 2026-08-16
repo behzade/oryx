@@ -11,7 +11,7 @@ use crate::audio::PlaybackSource;
 use crate::library::{Library, PreparedPlaybackTrack};
 use crate::model::Track;
 use crate::progressive::ProgressiveDownload;
-use crate::provider::{SharedProvider, TrackSummary};
+use crate::provider::{PlaybackCachePolicy, SharedProvider, TrackSummary};
 use crate::url_media::{
     MediaResolveMethod, direct_link_fallback_download_error, download_video_to_path,
     fallback_title_for_url, next_download_destination, resolve_video_url,
@@ -182,6 +182,12 @@ impl TransferManager {
             .name("transfer-download-request".to_string())
             .spawn(move || {
                 let result = (|| -> anyhow::Result<()> {
+                    if !provider.allows_download(&selected_track) {
+                        anyhow::bail!(
+                            "{} does not allow offline downloads in Oryx.",
+                            provider.display_name()
+                        );
+                    }
                     let song = block_on(provider.get_song_data(&selected_track.reference))?;
                     if progress.is_cancelled() {
                         anyhow::bail!("Download cancelled.");
@@ -338,10 +344,15 @@ fn resolve_playback(
     collection_id_override: Option<String>,
     position: Option<Duration>,
 ) -> anyhow::Result<ReadyPlayback> {
-    if let Some(prepared) =
-        library.prepare_cached_track_for_playback(&selected_track, track_position)?
-    {
-        return Ok(ready_playback_from_prepared(selected_track, prepared));
+    let cache_policy = provider
+        .as_ref()
+        .map(|provider| provider.playback_cache_policy());
+    if cache_policy != Some(PlaybackCachePolicy::SessionOnly) {
+        if let Some(prepared) =
+            library.prepare_cached_track_for_playback(&selected_track, track_position)?
+        {
+            return Ok(ready_playback_from_prepared(selected_track, prepared));
+        }
     }
 
     let provider = provider.ok_or_else(|| {
@@ -353,13 +364,21 @@ fn resolve_playback(
     })?;
 
     let song = block_on(provider.get_song_data(&selected_track.reference))?;
-    let prepared = library.prepare_track_for_playback(
-        provider.as_ref(),
-        &selected_track,
-        track_position,
-        &song,
-        position,
-    )?;
+    let prepared = match provider.playback_cache_policy() {
+        PlaybackCachePolicy::Persistent => library.prepare_track_for_playback(
+            provider.as_ref(),
+            &selected_track,
+            track_position,
+            &song,
+            position,
+        )?,
+        PlaybackCachePolicy::SessionOnly => library.prepare_session_track_for_playback(
+            provider.as_ref(),
+            &selected_track,
+            &song,
+            position,
+        )?,
+    };
 
     if let Some(cache_monitor) = prepared.cache_monitor.clone() {
         let track_id = track_cache_key(&selected_track);

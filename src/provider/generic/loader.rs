@@ -49,7 +49,10 @@ pub(super) fn load_configured_providers_from_sources(
     library: Option<&Library>,
 ) -> Result<Vec<SharedProvider>> {
     let mut providers: Vec<SharedProvider> = Vec::new();
-    let mut seen_ids = HashSet::from([ProviderId::Local.as_str().to_string()]);
+    let mut seen_ids = HashSet::from([
+        ProviderId::Audius.as_str().to_string(),
+        ProviderId::Local.as_str().to_string(),
+    ]);
 
     for provider_dir in provider_dirs {
         fs::create_dir_all(provider_dir).with_context(|| {

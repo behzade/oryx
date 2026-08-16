@@ -2,11 +2,14 @@ mod coordinator;
 
 use std::collections::HashSet;
 
-use crate::provider::{CollectionSummary, ProviderId, SharedProvider, TrackList};
+use crate::provider::{
+    CollectionSummary, ProviderId, SearchResult, SharedProvider, TrackList, TrackSummary,
+};
 
 pub(super) struct DiscoverModule {
     enabled_search_providers: HashSet<ProviderId>,
     search_results: Vec<CollectionSummary>,
+    track_search_results: Vec<TrackSummary>,
     selected_collection_id: Option<String>,
     track_list: Option<TrackList>,
     search_loading: bool,
@@ -20,12 +23,14 @@ impl DiscoverModule {
     pub(super) fn new(
         enabled_search_providers: HashSet<ProviderId>,
         search_results: Vec<CollectionSummary>,
+        track_search_results: Vec<TrackSummary>,
         selected_collection_id: Option<String>,
         track_list: Option<TrackList>,
     ) -> Self {
         Self {
             enabled_search_providers,
             search_results,
+            track_search_results,
             selected_collection_id,
             track_list,
             search_loading: false,
@@ -38,6 +43,27 @@ impl DiscoverModule {
 
     pub(super) fn search_results(&self) -> Vec<CollectionSummary> {
         self.search_results.clone()
+    }
+
+    pub(super) fn track_search_results(&self) -> Vec<TrackSummary> {
+        self.track_search_results.clone()
+    }
+
+    pub(super) fn search_result_count(&self) -> usize {
+        self.track_search_results.len() + self.search_results.len()
+    }
+
+    pub(super) fn search_result_at(&self, index: usize) -> Option<SearchResult> {
+        self.track_search_results
+            .get(index)
+            .cloned()
+            .map(SearchResult::Track)
+            .or_else(|| {
+                self.search_results
+                    .get(index.saturating_sub(self.track_search_results.len()))
+                    .cloned()
+                    .map(SearchResult::Collection)
+            })
     }
 
     pub(super) fn selected_collection_id(&self) -> Option<String> {
@@ -133,6 +159,7 @@ impl DiscoverModule {
         self.search_loading = false;
         self.track_list_loading = false;
         self.search_results.clear();
+        self.track_search_results.clear();
         self.selected_collection_id = None;
         self.track_list = None;
         self.source_picker_open = false;
@@ -143,6 +170,7 @@ impl DiscoverModule {
         self.search_loading = true;
         self.track_list_loading = false;
         self.search_results.clear();
+        self.track_search_results.clear();
         self.selected_collection_id = None;
         self.track_list = None;
         self.search_nonce
@@ -152,9 +180,14 @@ impl DiscoverModule {
         self.search_nonce == nonce
     }
 
-    pub(super) fn finish_search(&mut self, results: Vec<CollectionSummary>) {
+    pub(super) fn finish_search(
+        &mut self,
+        collections: Vec<CollectionSummary>,
+        tracks: Vec<TrackSummary>,
+    ) {
         self.search_loading = false;
-        self.search_results = results;
+        self.search_results = collections;
+        self.track_search_results = tracks;
     }
 
     pub(super) fn fail_search(&mut self) {

@@ -92,6 +92,16 @@ impl OryxApp {
             cx.notify();
             return;
         };
+        if !provider.allows_download(&selected_track) {
+            let message = format!(
+                "{} tracks are stream-only in Oryx.",
+                provider.display_name()
+            );
+            self.status_message = Some(message.clone());
+            self.show_notification(message, NotificationLevel::Error, cx);
+            cx.notify();
+            return;
+        }
         let library = self.library.clone();
         let track_title = selected_track.title.clone();
         self.status_message = Some(format!("Downloading '{}'.", track_title));
@@ -174,6 +184,15 @@ impl OryxApp {
         });
         self.status_message = Some(if is_cached {
             "Starting playback.".to_string()
+        } else if provider
+            .as_ref()
+            .map(|provider| {
+                provider.playback_cache_policy()
+                    == crate::provider::PlaybackCachePolicy::SessionOnly
+            })
+            .unwrap_or(false)
+        {
+            "Resolving and starting playback.".to_string()
         } else {
             "Resolving, caching, and starting playback".to_string()
         });
@@ -309,10 +328,11 @@ impl OryxApp {
                                 .get(request.index)
                                 .cloned()
                                 .map(|track| {
-                                    track_for_recently_played(
-                                        track,
-                                        playback.current.artwork_path.as_ref(),
-                                    )
+                                    let durable_artwork_path =
+                                        playback.current.artwork_path.as_ref().filter(|path| {
+                                            !self.library.is_session_cache_path(path)
+                                        });
+                                    track_for_recently_played(track, durable_artwork_path)
                                 });
                             let has_recently_played_track = recently_played_track.is_some();
                             if let Some(track) = recently_played_track

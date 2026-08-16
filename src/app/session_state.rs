@@ -4,7 +4,7 @@ use gpui::Context;
 
 use crate::library::{Library, PersistedExternalDownload, SessionSnapshot};
 use crate::model::{PlaybackStatus, RepeatMode, Track};
-use crate::provider::{CollectionSummary, TrackList};
+use crate::provider::{CollectionSummary, TrackList, TrackSummary};
 
 use super::{BrowseMode, OryxApp, collection_browser_key, collection_entity_key};
 
@@ -13,6 +13,7 @@ pub(super) struct RestoredSessionState {
     pub(super) query_cursor: usize,
     pub(super) browse_mode: BrowseMode,
     pub(super) search_results: Vec<CollectionSummary>,
+    pub(super) track_search_results: Vec<TrackSummary>,
     pub(super) selected_collection_id: Option<String>,
     pub(super) track_list: Option<TrackList>,
     pub(super) playback_context: Option<TrackList>,
@@ -40,6 +41,7 @@ pub(super) fn restored_session_state(
             query_cursor: 0,
             browse_mode: BrowseMode::Discover,
             search_results: Vec::new(),
+            track_search_results: Vec::new(),
             selected_collection_id: None,
             track_list: None,
             playback_context: None,
@@ -116,6 +118,7 @@ pub(super) fn restored_session_state(
         query,
         browse_mode: snapshot.browse_mode,
         search_results: snapshot.search_results,
+        track_search_results: snapshot.track_search_results,
         selected_collection_id,
         track_list: snapshot.browser_track_list,
         playback_context,
@@ -146,6 +149,7 @@ pub(super) fn persist_session_snapshot(app: &OryxApp, cx: &gpui::App) {
         query: app.query_input.content().to_string(),
         browse_mode: app.browse_mode,
         search_results: discover.search_results(),
+        track_search_results: discover.track_search_results(),
         browser_collection_id: discover.selected_collection_id(),
         browser_track_list: discover.track_list(),
         playback_context: playback_state.playback_context(),

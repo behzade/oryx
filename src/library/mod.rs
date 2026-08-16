@@ -7,6 +7,7 @@ mod session;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -33,6 +34,25 @@ pub use session::{PersistedExternalDownload, PersistedExternalDownloadState, Ses
 pub struct Library {
     library_root: PathBuf,
     db_path: PathBuf,
+    session_cache: Arc<SessionCache>,
+}
+
+#[derive(Debug)]
+struct SessionCache {
+    root: PathBuf,
+}
+
+impl Drop for SessionCache {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_dir_all(&self.root)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "failed to clear session cache at {}: {error}",
+                self.root.display()
+            );
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +88,7 @@ impl Library {
     pub fn new_in(root: PathBuf) -> Result<Self> {
         let library_root = root.join("library");
         let db_path = root.join("oryx.db");
+        let session_cache_root = root.join("session-cache");
 
         fs::create_dir_all(&library_root).with_context(|| {
             format!(
@@ -75,10 +96,27 @@ impl Library {
                 library_root.display()
             )
         })?;
+        if session_cache_root.exists() {
+            fs::remove_dir_all(&session_cache_root).with_context(|| {
+                format!(
+                    "Failed to clear stale session cache at {}",
+                    session_cache_root.display()
+                )
+            })?;
+        }
+        fs::create_dir_all(&session_cache_root).with_context(|| {
+            format!(
+                "Failed to create session cache at {}",
+                session_cache_root.display()
+            )
+        })?;
 
         let library = Self {
             library_root,
             db_path,
+            session_cache: Arc::new(SessionCache {
+                root: session_cache_root,
+            }),
         };
         library.initialize()?;
 
@@ -119,6 +157,24 @@ impl Library {
             song,
             position,
         )
+    }
+
+    pub fn prepare_session_track_for_playback(
+        &self,
+        provider: &dyn MusicProvider,
+        selected_track: &TrackSummary,
+        song: &SongData,
+        position: Option<std::time::Duration>,
+    ) -> Result<PreparedPlaybackTrack> {
+        cache::prepare_session_track_for_playback(self, provider, selected_track, song, position)
+    }
+
+    pub(super) fn session_cache_root(&self) -> &std::path::Path {
+        &self.session_cache.root
+    }
+
+    pub(crate) fn is_session_cache_path(&self, path: &std::path::Path) -> bool {
+        path.starts_with(&self.session_cache.root)
     }
 
     pub fn prepare_cached_track_for_playback(

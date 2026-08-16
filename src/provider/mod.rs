@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod audius;
 mod generic;
 mod local;
 
@@ -13,6 +14,7 @@ use async_trait::async_trait;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+pub use self::audius::AudiusProvider;
 pub(crate) use self::generic::{ConfiguredProviderImport, ConfiguredProviderImportStatus};
 pub use self::local::LocalProvider;
 
@@ -64,6 +66,7 @@ struct ProviderMetadata {
 
 #[allow(non_upper_case_globals)]
 impl ProviderId {
+    pub const Audius: Self = Self("audius");
     pub const Local: Self = Self("local");
 
     pub fn as_str(self) -> &'static str {
@@ -72,30 +75,30 @@ impl ProviderId {
 
     pub fn parse(value: &str) -> Option<Self> {
         let normalized = normalize_provider_id(value)?;
-        if normalized == Self::Local.as_str() {
-            Some(Self::Local)
-        } else {
-            Some(Self(intern_provider_id(&normalized)))
+        match normalized.as_str() {
+            value if value == Self::Audius.as_str() => Some(Self::Audius),
+            value if value == Self::Local.as_str() => Some(Self::Local),
+            _ => Some(Self(intern_provider_id(&normalized))),
         }
     }
 
     pub fn display_name(self) -> &'static str {
-        if self == Self::Local {
-            "Local"
-        } else {
-            lookup_provider_metadata(self)
+        match self {
+            Self::Audius => "Audius",
+            Self::Local => "Local",
+            _ => lookup_provider_metadata(self)
                 .and_then(|metadata| metadata.display_name)
-                .unwrap_or_else(|| self.as_str())
+                .unwrap_or_else(|| self.as_str()),
         }
     }
 
     pub fn short_display_name(self) -> &'static str {
-        if self == Self::Local {
-            "Local"
-        } else {
-            lookup_provider_metadata(self)
+        match self {
+            Self::Audius => "Audius",
+            Self::Local => "Local",
+            _ => lookup_provider_metadata(self)
                 .and_then(|metadata| metadata.short_display_name.or(metadata.display_name))
-                .unwrap_or_else(|| self.as_str())
+                .unwrap_or_else(|| self.as_str()),
         }
     }
 
@@ -408,6 +411,12 @@ pub struct SongData {
     pub stream: StreamRequest,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaybackCachePolicy {
+    Persistent,
+    SessionOnly,
+}
+
 #[async_trait]
 pub trait MusicProvider: Send + Sync {
     fn id(&self) -> ProviderId;
@@ -436,6 +445,14 @@ pub trait MusicProvider: Send + Sync {
         None
     }
 
+    fn playback_cache_policy(&self) -> PlaybackCachePolicy {
+        PlaybackCachePolicy::Persistent
+    }
+
+    fn allows_download(&self, _track: &TrackSummary) -> bool {
+        true
+    }
+
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>>;
 
     async fn get_track_list(&self, collection: &CollectionRef) -> Result<TrackList>;
@@ -453,7 +470,10 @@ pub struct ProviderRegistry {
 
 impl ProviderRegistry {
     pub fn with_defaults(library: Option<&crate::library::Library>) -> Self {
-        let mut providers: Vec<SharedProvider> = vec![Arc::new(LocalProvider::new())];
+        let mut providers: Vec<SharedProvider> = vec![
+            Arc::new(LocalProvider::new()),
+            Arc::new(AudiusProvider::new()),
+        ];
 
         match generic::load_configured_providers(library) {
             Ok(mut configured) => {

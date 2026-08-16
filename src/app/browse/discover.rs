@@ -7,6 +7,7 @@ use gpui::{
 };
 
 use crate::platform;
+use crate::provider::SearchResult;
 use crate::theme;
 
 use super::rows::{
@@ -15,7 +16,7 @@ use super::rows::{
 };
 use super::{
     AppIcon, BrowseMode, CollectionKindLabel, OryxApp, SOURCE_MENU_TOP_OFFSET, SOURCE_MENU_WIDTH,
-    TOPBAR_SIDE_SLOT_WIDTH, collection_entity_key, render_icon_with_color,
+    TOPBAR_SIDE_SLOT_WIDTH, collection_entity_key, format_duration, render_icon_with_color,
 };
 use crate::app::text_input::{TextInputElement, TextInputId};
 
@@ -444,8 +445,8 @@ impl OryxApp {
                 .py(px(theme::SPACE_3));
         }
 
-        let search_results = self.discover.read(cx).search_results();
-        if search_results.is_empty() {
+        let item_count = self.discover.read(cx).search_result_count();
+        if item_count == 0 {
             return self
                 .render_discover_results_body(window, empty_state("No results yet."), cx)
                 .w(px(self.discovery_column_width(window)))
@@ -454,7 +455,6 @@ impl OryxApp {
                 .py(px(theme::SPACE_3));
         }
 
-        let item_count = search_results.len();
         let body = uniform_list(
             "results-list",
             item_count,
@@ -462,39 +462,82 @@ impl OryxApp {
                 move |this: &mut OryxApp, range: Range<usize>, _window, cx| {
                     let mut items = Vec::with_capacity(range.len());
                     for index in range {
-                        let collection = this.discover.read(cx).search_results()[index].clone();
-                        let collection_key = collection_entity_key(&collection.reference);
-                        let active = this.discover.read(cx).selected_collection_id().as_deref()
-                            == Some(collection_key.as_str());
-                        let title = collection.title.clone();
-                        let kind_label = collection.reference.kind.label();
-                        let primary_metadata =
-                            sidebar_primary_metadata(collection.subtitle.as_deref(), kind_label);
-                        let secondary_metadata = sidebar_secondary_metadata(
-                            Some(kind_label),
-                            collection.track_count,
-                            &primary_metadata,
-                        );
-                        let metadata = this.collection_metadata(&collection, cx);
-                        let reference = collection.reference.clone();
-                        let artwork_url = collection.artwork_url.clone();
-                        items.push(
-                            clickable_row(
-                                &title,
-                                &primary_metadata,
-                                secondary_metadata.as_deref(),
-                                metadata,
-                                super::rows::render_collection_artwork(artwork_url, 62.),
-                                active,
-                            )
-                            .id(("discover", index))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
-                                    this.load_collection(reference.clone(), cx);
-                                }),
-                            ),
-                        );
+                        let Some(result) = this.discover.read(cx).search_result_at(index) else {
+                            continue;
+                        };
+                        match result {
+                            SearchResult::Collection(collection) => {
+                                let collection_key = collection_entity_key(&collection.reference);
+                                let active =
+                                    this.discover.read(cx).selected_collection_id().as_deref()
+                                        == Some(collection_key.as_str());
+                                let title = collection.title.clone();
+                                let kind_label = collection.reference.kind.label();
+                                let primary_metadata = sidebar_primary_metadata(
+                                    collection.subtitle.as_deref(),
+                                    kind_label,
+                                );
+                                let secondary_metadata = sidebar_secondary_metadata(
+                                    Some(kind_label),
+                                    collection.track_count,
+                                    &primary_metadata,
+                                );
+                                let metadata = this.collection_metadata(&collection, cx);
+                                let reference = collection.reference.clone();
+                                let artwork_url = collection.artwork_url.clone();
+                                items.push(
+                                    clickable_row(
+                                        &title,
+                                        &primary_metadata,
+                                        secondary_metadata.as_deref(),
+                                        metadata,
+                                        super::rows::render_collection_artwork(artwork_url, 62.),
+                                        active,
+                                    )
+                                    .id(("discover", index))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(
+                                            move |this, _event: &MouseDownEvent, _window, cx| {
+                                                this.load_collection(reference.clone(), cx);
+                                            },
+                                        ),
+                                    ),
+                                );
+                            }
+                            SearchResult::Track(track) => {
+                                let title = track.title.clone();
+                                let primary_metadata = track
+                                    .artist
+                                    .clone()
+                                    .unwrap_or_else(|| "Unknown artist".to_string());
+                                let secondary_metadata = format!(
+                                    "{}  •  Track  •  {}",
+                                    track.reference.provider.display_name(),
+                                    format_duration(track.duration_seconds)
+                                );
+                                let artwork_url = track.artwork_url.clone();
+                                items.push(
+                                    clickable_row(
+                                        &title,
+                                        &primary_metadata,
+                                        Some(&secondary_metadata),
+                                        None,
+                                        super::rows::render_collection_artwork(artwork_url, 62.),
+                                        false,
+                                    )
+                                    .id(("discover", index))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(
+                                            move |this, _event: &MouseDownEvent, _window, cx| {
+                                                this.play_search_track(track.clone(), cx);
+                                            },
+                                        ),
+                                    ),
+                                );
+                            }
+                        }
                     }
                     items
                 },
